@@ -11,3 +11,6 @@
 .idea/
 .vscode/
 *.test
+
+# Property-test failure artefacts
+**/testdata/rapid/

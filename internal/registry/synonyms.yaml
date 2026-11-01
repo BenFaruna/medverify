@@ -1,0 +1,103 @@
+# Ingredient synonym table (phase 02).
+#
+# The key is the canonical normalized name. Each value is a list of spelling
+# variants that should map to it. Matching happens after lowercasing, Unicode
+# normalization, punctuation cleanup, and removal of trailing salt/hydrate
+# qualifiers. Keep entries alphabetical inside each block; add a new entry when
+# the ingestion report lists a name we do not know.
+synonyms:
+  paracetamol:
+    - acetaminophen
+    - acetominophen
+    - para-acetylaminophenol
+  acetylsalicylic acid:
+    - aspirin
+  aluminium hydroxide:
+    - aluminum hydroxide
+  amoxicillin:
+    - amoxycillin
+  ascorbic acid:
+    - vitamin c
+    - vit c
+  chlorphenamine:
+    - chlorpheniramine
+  cyanocobalamin:
+    - vitamin b12
+    - vit b12
+  ergocalciferol:
+    - vitamin d2
+    - vit d2
+  folic acid:
+    - folate
+    - folacin
+  nicotinamide:
+    - niacinamide
+  pyridoxine:
+    - vitamin b6
+    - vit b6
+  riboflavin:
+    - vitamin b2
+    - vit b2
+  thiamine:
+    - vitamin b1
+    - vit b1
+  tocopherol:
+    - vitamin e
+    - vit e
+  retinol:
+    - vitamin a
+    - vit a
+  colecalciferol:
+    - vitamin d3
+    - vit d3
+
+# Tokens removed from the end of a name when another token remains. They are
+# salt, hydrate, or pharmacopoeia qualifiers, not part of the active moiety.
+# The raw name is always kept alongside the normalized one.
+qualifiers:
+  - hydrochloride
+  - hydrobromide
+  - sulfate
+  - sulphate
+  - bisulfate
+  - bisulphate
+  - nitrate
+  - phosphate
+  - diphosphate
+  - citrate
+  - maleate
+  - fumarate
+  - tartrate
+  - succinate
+  - acetate
+  - mesylate
+  - tosylate
+  - besylate
+  - lactate
+  - gluconate
+  - carbonate
+  - bicarbonate
+  - chloride
+  - sodium
+  - potassium
+  - calcium
+  - magnesium
+  - zinc
+  - lithium
+  - ammonium
+  - ferric
+  - ferrous
+  - dihydrate
+  - monohydrate
+  - trihydrate
+  - tetrahydrate
+  - anhydrous
+  - hydrate
+  - hcl
+  - hbr
+  - bp
+  - usp
+  - ep
+  - jp
+  - ip
+  - ph.eur
