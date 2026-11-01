@@ -1,0 +1,98 @@
+[
+  {
+    "source_id": "6931",
+    "nrn": "A6-100070",
+    "name": "Actemra 162 mg**",
+    "category": "Vaccines and Biologics",
+    "status": "Active",
+    "applicant": "Roche Products Limited",
+    "manufacturer_source_id": "766",
+    "composition_raw": "Each single-dose prefilled syringe contains: Tocilizumab 162 mg in 0.9 mL solution.\nTocilizumab is a humanized IgG1 monoclonal antibody against the human interleukin-6 (IL-6) receptor produced in Chinese hamster ovary (CHO) cells by recombinant DNA technology",
+    "form": "Solution for injection",
+    "route": "Subcutaneous",
+    "strength_raw": "162 mg/0.9 mL",
+    "pack_size": "0.9 mL x 4’s (in pre-filled syringed)",
+    "atc_code": "L04AC07",
+    "approved_at": "2023-02-19T00:00:00Z",
+    "expires_at": "2028-02-18T00:00:00Z",
+    "smpc_url": "https://admin.greenbook.nafdac.gov.ng/uploadImage/smpc_files/2025/01/05/20250105f665e9b8-1d5c-521f-ac85-db9a6933942d.pdf",
+    "description": "Solution for injection in single-dose pre-filled syringe for SC injection.\nA preservative-free, sterile clear, colourless to pale yellow solution",
+    "ingredients": [
+      {
+        "name_raw": "Tocilizumab",
+        "name_norm": "tocilizumab",
+        "strength": {
+          "raw": "162 mg/0.9 mL",
+          "value": 162,
+          "unit": "mg",
+          "per_unit": "0.9 mL"
+        },
+        "strength_raw": "162 mg/0.9 mL"
+      }
+    ]
+  },
+  {
+    "source_id": "6932",
+    "nrn": "A6-100067",
+    "name": "Actemra 200 mg**",
+    "category": "Vaccines and Biologics",
+    "status": "Active",
+    "applicant": "Roche Products Limited",
+    "manufacturer_source_id": "763",
+    "composition_raw": "Each single-dose vial contains: Tocilizumab 200 mg in 10 mL concentrate (20 mg/mL).\nTocilizumab is a humanised IgG1 monoclonal antibody against the human interleukin-6 (IL-6) receptor produced in Chinese hamster ovary (CHO) cells by recombinant DNA technology\n\nExcipients with known effects:\nEach 200 mg vial contains 0.20 mmol (4.43 mg) Sodium",
+    "form": "Concentrate for solution for infusion",
+    "route": "Intravenous",
+    "strength_raw": "200 mg/10mL",
+    "pack_size": "10 mL x 1’s; 10 mL x 4’s (in vials)",
+    "atc_code": "L04AC07",
+    "approved_at": "2022-12-18T00:00:00Z",
+    "expires_at": "2027-12-17T00:00:00Z",
+    "smpc_url": "https://admin.greenbook.nafdac.gov.ng/uploadImage/smpc_files/2025/01/05/202501050310fb03-e54d-5822-abf4-ca8dc1e98124.pdf",
+    "description": "Concentrate for solution for IV infusion in single-dose 10-mL vial.\nA preservative-free, sterile clear, colourless to pale yellow solution",
+    "ingredients": [
+      {
+        "name_raw": "Tocilizumab",
+        "name_norm": "tocilizumab",
+        "strength": {
+          "raw": "200 mg/10mL",
+          "value": 200,
+          "unit": "mg",
+          "per_unit": "10 mL"
+        },
+        "strength_raw": "200 mg/10mL"
+      }
+    ]
+  },
+  {
+    "source_id": "6933",
+    "nrn": "A6-100066",
+    "name": "Actemra 400 mg**",
+    "category": "Vaccines and Biologics",
+    "status": "Active",
+    "applicant": "Roche Products Limited",
+    "manufacturer_source_id": "763",
+    "composition_raw": "Each single-dose vial contains: Tocilizumab 400 mg in 20 mL concentrate (20 mg/mL).\nTocilizumab is a humanised IgG1 monoclonal antibody against the human interleukin-6 (IL-6) receptor produced in Chinese hamster ovary (CHO) cells by recombinant DNA technology\n\nExcipients with known effects:\nEach 400 mg vial contains 0.39 mmol (8.85 mg) Sodium",
+    "form": "Concentrate for solution for infusion",
+    "route": "Intravenous",
+    "strength_raw": "400 mg/20 mL",
+    "pack_size": "20 mL x 1’s; 20 mL x 4’s (in vials)",
+    "atc_code": "L04AC07",
+    "approved_at": "2022-12-18T00:00:00Z",
+    "expires_at": "2027-12-17T00:00:00Z",
+    "smpc_url": "https://admin.greenbook.nafdac.gov.ng/uploadImage/smpc_files/2025/01/05/202501059d36de32-9325-5791-a555-1fa81e046e45.pdf",
+    "description": "Concentrate for solution for IV infusion in single-dose 20-mL vial.\nA preservative-free, sterile clear, colourless to pale yellow solution",
+    "ingredients": [
+      {
+        "name_raw": "Tocilizumab",
+        "name_norm": "tocilizumab",
+        "strength": {
+          "raw": "400 mg/20 mL",
+          "value": 400,
+          "unit": "mg",
+          "per_unit": "20 mL"
+        },
+        "strength_raw": "400 mg/20 mL"
+      }
+    ]
+  }
+]

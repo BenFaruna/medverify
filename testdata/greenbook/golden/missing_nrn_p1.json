@@ -1,0 +1,102 @@
+[
+  {
+    "source_id": "5576",
+    "nrn": "",
+    "name": "Avocomb Tablets 150/300 mg## (no NRN)",
+    "category": "Drugs",
+    "status": "Active",
+    "applicant": "Ranbaxy Nigeria Limited",
+    "manufacturer_source_id": "184",
+    "composition_raw": "Each tablet contains: Lamivudine 150 mg, Zidovudine 300 mg\nExcipients q.s.",
+    "form": "Tablet",
+    "route": "Oral",
+    "strength_raw": "150 mg; 300 mg",
+    "pack_size": "1 x 60's (in HDPE bottle)",
+    "atc_code": "J05AR01",
+    "approved_at": "2023-03-28T00:00:00Z",
+    "expires_at": "2028-03-27T00:00:00Z",
+    "smpc_url": "https://admin.greenbook.nafdac.gov.ng/uploadImage/smpc_files/2024/12/24/202412247e408225-fba6-5ff5-94c2-134e6e542066.pdf",
+    "description": "Film Coated Tablet\nWhite to off-white, film-coated, capsule-shaped tablets debossed with \"RX923\" on one side and plain on the other side",
+    "ingredients": [
+      {
+        "name_raw": "Lamivudine",
+        "name_norm": "lamivudine",
+        "strength": {
+          "raw": "150 mg",
+          "value": 150,
+          "unit": "mg"
+        },
+        "strength_raw": "150 mg"
+      },
+      {
+        "name_raw": "Zidovudine",
+        "name_norm": "zidovudine",
+        "strength": {
+          "raw": "300 mg",
+          "value": 300,
+          "unit": "mg"
+        },
+        "strength_raw": "300 mg"
+      }
+    ]
+  },
+  {
+    "source_id": "12077",
+    "nrn": "00-0000",
+    "name": "Flamingo Thigh Support*# (no NRN)",
+    "category": "Medical devices",
+    "status": "Active",
+    "applicant": "CHI Pharmaceutical Limited",
+    "manufacturer_source_id": "989",
+    "composition_raw": "Two Way Stretchy Fabric Comprising of Nylon and Spandex",
+    "form": "NA",
+    "route": "NA",
+    "strength_raw": "NA",
+    "pack_size": "1 pc x pack",
+    "atc_code": "NA",
+    "approved_at": "2025-07-23T00:00:00Z",
+    "expires_at": "2030-12-28T00:00:00Z",
+    "description": "Flamingo Thigh Support",
+    "ingredients": [
+      {
+        "name_raw": "Medical device",
+        "name_norm": "medical device",
+        "strength": {
+          "raw": "NA"
+        },
+        "strength_raw": "NA"
+      }
+    ]
+  },
+  {
+    "source_id": "5719",
+    "nrn": "A11-100456",
+    "name": "Nalis Ferrous Sulphate## (no NRN)",
+    "category": "Drugs",
+    "status": "Active",
+    "applicant": "Nalis Pharmaceuticals Ltd",
+    "manufacturer_source_id": "191",
+    "composition_raw": "Each tablet contains: Ferrous Sulfate 200 mg\nExcipients q.s",
+    "form": "Tablet",
+    "route": "Oral",
+    "strength_raw": "200 mg",
+    "pack_size": "1 x 1000's (in a jar)",
+    "atc_code": "B03AA07",
+    "approved_at": "2023-01-26T00:00:00Z",
+    "expires_at": "2028-01-25T00:00:00Z",
+    "smpc_url": "https://admin.greenbook.nafdac.gov.ng/uploadImage/smpc_files/2024/06/24/20240624e57cbf3e-ae10-5ea0-a502-78eb02b635c8.pdf",
+    "description": "Tablet\nRed colored, circular, flat and coated tablets\n\nNALIS FERROUS SULPHATE\t\tNALIS FERROUS SULPHATE\tEach sugar coated tablet of Nalis Ferrous Sulphate® contains Dried Ferrous Sulphate B.P. 200mg equivalent to 65mg of elemental iron.\tDrugs\tOTC\t\tTablet\t\t\t\tNALIS PHARMACEUTICALS LTD, DOCEMO STREET, IDUMOTA, LAGOS LAGOS\t\tNALIS PHARMACEUTICALS LIMITED, PLOT R67-R68, NEKEDE-NAZE INDUSTRIAL CLUSTER, NEKEDE, OWERRI, IMO STATE, Nigeria\t1/26/2023\t1/25/2028",
+    "ingredients": [
+      {
+        "name_raw": "Ferrous sulfate",
+        "name_norm": "ferrous sulfate",
+        "strength": {
+          "raw": "200 mg",
+          "value": 200,
+          "unit": "mg"
+        },
+        "strength_raw": "200 mg"
+      }
+    ]
+  }
+]

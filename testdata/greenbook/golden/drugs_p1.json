@@ -1,0 +1,95 @@
+[
+  {
+    "source_id": "8875",
+    "nrn": "04-0858",
+    "name": "10% Dextrose (500/1000 mL)**",
+    "category": "Drugs",
+    "status": "Inactive",
+    "applicant": "Dana Pharmaceuticals Limited",
+    "manufacturer_source_id": "5",
+    "composition_raw": "Each 100 mL of solution contains: Dextrose Monohydrate BP 10 g w/v, Water for injection q.s. to 100 mL",
+    "form": "Solution for infusion",
+    "route": "Intravenous",
+    "strength_raw": "10%",
+    "pack_size": "500 mL; 1000 mL (in Viaflo pouches)",
+    "atc_code": "B05BB02",
+    "approved_at": "2021-08-03T00:00:00Z",
+    "expires_at": "2026-08-02T00:00:00Z",
+    "smpc_url": "https://admin.greenbook.nafdac.gov.ng/uploadImage/smpc_files/2025/01/29/2025012972bec18a-300c-5fbf-bb61-76a2186867c8.pdf",
+    "description": "Solution for Intravenous Infusion",
+    "ingredients": [
+      {
+        "name_raw": "Glucose",
+        "name_norm": "glucose",
+        "strength": {
+          "raw": "10%",
+          "value": 10,
+          "unit": "%"
+        },
+        "strength_raw": "10%"
+      }
+    ]
+  },
+  {
+    "source_id": "12440",
+    "nrn": "A11-0237",
+    "name": "10% DEXTROSE INFUSION $",
+    "category": "Drugs",
+    "status": "Inactive",
+    "applicant": "Fidson Healthcare PLC",
+    "manufacturer_source_id": "6",
+    "composition_raw": "Each 100 mL of solution contains: glucose anhydrous BP 10 g w/v,\nWater for injection q.s.",
+    "form": "Solution for infusion",
+    "route": "Intravenous",
+    "strength_raw": "10%",
+    "pack_size": "500 mL",
+    "atc_code": "B05BB02",
+    "approved_at": "2021-10-28T00:00:00Z",
+    "expires_at": "2026-10-27T00:00:00Z",
+    "smpc_url": "https://admin.greenbook.nafdac.gov.ng/uploadImage/smpc_files/2026/03/03/20260303518d9c07-2898-5b62-b464-7c25b9068731.pdf",
+    "description": "10% DEXTROSE INFUSION\tA11-0237\t\tDEXTROSE ANHYDROUS\t\tELECTROLYTE REPLACEMENT\tDRUG\tGLUCOSE ANHYDROUS 10G/100ML\tINFUSION X 500ML\tINFUSION \t 500ML\tPRESCRIPTION ONLY MEDICINE\tUSED TO TREAT SEVERE DIARRHOEA AND CHOLERA AND ALSO TO REPLACE BODY FLUID AND MINERAL SALTS THAT MAY BE LOST FOR A VARIETY OF MEDICAL REASONS\tFIDSON HEALTHCARE PLC\t\t\tKM. 38, LAGOS- ABEOKUTA EXPRESSWAY SANGO-OTA, OGUN STATE., NIGERIA\tNIGERIA\tFIDSON HEALTHCARE PLC\t\t\tKM. 38, LAGOS- ABEOKUTA EXPRESSWAY SANGO-OTA, OGUN STATE., NIGERIA\tNIGERIA\t\t28TH OCTOBER, 2021\t27TH OCTOBER, 2026",
+    "ingredients": [
+      {
+        "name_raw": "Dextrose Anhydrous",
+        "name_norm": "dextrose",
+        "strength": {
+          "raw": "10%",
+          "value": 10,
+          "unit": "%"
+        },
+        "strength_raw": "10%"
+      }
+    ]
+  },
+  {
+    "source_id": "12441",
+    "nrn": "A4-101970",
+    "name": "1980 Azithromycin Tablets USP 500 mg $",
+    "category": "Drugs",
+    "status": "Active",
+    "applicant": "1980 Pharmaceutical Limited",
+    "manufacturer_source_id": "239",
+    "composition_raw": "Each film coated tablet contains: Azithromycin Dihydrate USP equivalent to Azithromycin 500 mg\nExcipients q.s.",
+    "form": "Tablet",
+    "route": "Oral",
+    "strength_raw": "500mg",
+    "pack_size": "1X10",
+    "atc_code": "J01FA10",
+    "approved_at": "2026-02-24T00:00:00Z",
+    "expires_at": "2031-02-23T00:00:00Z",
+    "smpc_url": "https://admin.greenbook.nafdac.gov.ng/uploadImage/smpc_files/2026/04/02/202604028396342c-8aef-5414-b82e-57b0302267d9.pdf",
+    "description": "Azithromycin Tablets USP 500MG\tAzithromycin Tablets USP 500MG\t\"AZITHROMYCIN DIHYDRATE EQ. TO AZITHROMYCIN\tACTIVE\t534.000\"\tA4-101970\tDrugs\tImported Product\t1X10 TAB\t14-07-2025\t1980 PHARMACEUTICAL LIMITED, NO.D103, LAGOS LINE ABUBAKAR RIMI MARKET, KANO, , KANO\t08098437975\t1980pharmaceutical@gmail.com\tSURMOUNT LABORATORIES PVT LTD, A2/4003, G.I.D.C INDUSTRIAL ESTATE, ANKLESHWAR, DIST- BHARUCH, GUJARAT, INDIA",
+    "ingredients": [
+      {
+        "name_raw": "Azithromycin (Azithromycin Dihydrate)",
+        "name_norm": "azithromycin",
+        "strength": {
+          "raw": "500mg",
+          "value": 500,
+          "unit": "mg"
+        },
+        "strength_raw": "500mg"
+      }
+    ]
+  }
+]
