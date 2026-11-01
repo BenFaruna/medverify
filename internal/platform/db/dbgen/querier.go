@@ -6,8 +6,7 @@ package dbgen
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
+	"time"
 )
 
 type Querier interface {
@@ -41,7 +40,7 @@ type Querier interface {
 	// usable; similarity() orders the results so typos and word-order changes rank
 	// below exact matches.
 	SearchProductsByName(ctx context.Context, arg SearchProductsByNameParams) ([]SearchProductsByNameRow, error)
-	StartSyncRun(ctx context.Context, startedAt pgtype.Timestamptz) (SyncRun, error)
+	StartSyncRun(ctx context.Context, startedAt time.Time) (SyncRun, error)
 	// Queries for the Greenbook registry. Hand-written SQL only; sqlc compiles it.
 	// Insert or update a product when its payload hash changed. The xmax trick
 	// reports whether the row was inserted (true) or updated (false). No row is

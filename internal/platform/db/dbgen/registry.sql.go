@@ -624,7 +624,7 @@ VALUES ($1, 'running')
 RETURNING id, started_at, finished_at, status, rows_seen, rows_added, rows_changed, rows_failed, error
 `
 
-func (q *Queries) StartSyncRun(ctx context.Context, startedAt pgtype.Timestamptz) (SyncRun, error) {
+func (q *Queries) StartSyncRun(ctx context.Context, startedAt time.Time) (SyncRun, error) {
 	row := q.db.QueryRow(ctx, startSyncRun, startedAt)
 	var i SyncRun
 	err := row.Scan(
@@ -696,26 +696,26 @@ RETURNING id, (xmax = 0)::boolean AS inserted
 `
 
 type UpsertProductParams struct {
-	SourceID             string             `json:"source_id"`
-	Nrn                  *string            `json:"nrn"`
-	Name                 string             `json:"name"`
-	Category             *string            `json:"category"`
-	Status               string             `json:"status"`
-	Applicant            *string            `json:"applicant"`
-	Manufacturer         *string            `json:"manufacturer"`
-	ManufacturerSourceID *string            `json:"manufacturer_source_id"`
-	CompositionRaw       *string            `json:"composition_raw"`
-	Form                 *string            `json:"form"`
-	Route                *string            `json:"route"`
-	StrengthRaw          *string            `json:"strength_raw"`
-	PackSize             *string            `json:"pack_size"`
-	AtcCode              *string            `json:"atc_code"`
-	ApprovedAt           *time.Time         `json:"approved_at"`
-	ExpiresAt            *time.Time         `json:"expires_at"`
-	SmpcUrl              *string            `json:"smpc_url"`
-	Raw                  []byte             `json:"raw"`
-	PayloadHash          string             `json:"payload_hash"`
-	FetchedAt            pgtype.Timestamptz `json:"fetched_at"`
+	SourceID             string     `json:"source_id"`
+	Nrn                  *string    `json:"nrn"`
+	Name                 string     `json:"name"`
+	Category             *string    `json:"category"`
+	Status               string     `json:"status"`
+	Applicant            *string    `json:"applicant"`
+	Manufacturer         *string    `json:"manufacturer"`
+	ManufacturerSourceID *string    `json:"manufacturer_source_id"`
+	CompositionRaw       *string    `json:"composition_raw"`
+	Form                 *string    `json:"form"`
+	Route                *string    `json:"route"`
+	StrengthRaw          *string    `json:"strength_raw"`
+	PackSize             *string    `json:"pack_size"`
+	AtcCode              *string    `json:"atc_code"`
+	ApprovedAt           *time.Time `json:"approved_at"`
+	ExpiresAt            *time.Time `json:"expires_at"`
+	SmpcUrl              *string    `json:"smpc_url"`
+	Raw                  []byte     `json:"raw"`
+	PayloadHash          string     `json:"payload_hash"`
+	FetchedAt            time.Time  `json:"fetched_at"`
 }
 
 type UpsertProductRow struct {

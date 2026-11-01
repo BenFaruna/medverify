@@ -11,28 +11,28 @@ import (
 )
 
 type Product struct {
-	ID                   int64              `json:"id"`
-	SourceID             string             `json:"source_id"`
-	Nrn                  *string            `json:"nrn"`
-	Name                 string             `json:"name"`
-	Category             *string            `json:"category"`
-	Status               string             `json:"status"`
-	Applicant            *string            `json:"applicant"`
-	Manufacturer         *string            `json:"manufacturer"`
-	ManufacturerSourceID *string            `json:"manufacturer_source_id"`
-	CompositionRaw       *string            `json:"composition_raw"`
-	Form                 *string            `json:"form"`
-	Route                *string            `json:"route"`
-	StrengthRaw          *string            `json:"strength_raw"`
-	PackSize             *string            `json:"pack_size"`
-	AtcCode              *string            `json:"atc_code"`
-	ApprovedAt           *time.Time         `json:"approved_at"`
-	ExpiresAt            *time.Time         `json:"expires_at"`
-	SmpcUrl              *string            `json:"smpc_url"`
-	Raw                  []byte             `json:"raw"`
-	PayloadHash          string             `json:"payload_hash"`
-	FetchedAt            pgtype.Timestamptz `json:"fetched_at"`
-	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	ID                   int64      `json:"id"`
+	SourceID             string     `json:"source_id"`
+	Nrn                  *string    `json:"nrn"`
+	Name                 string     `json:"name"`
+	Category             *string    `json:"category"`
+	Status               string     `json:"status"`
+	Applicant            *string    `json:"applicant"`
+	Manufacturer         *string    `json:"manufacturer"`
+	ManufacturerSourceID *string    `json:"manufacturer_source_id"`
+	CompositionRaw       *string    `json:"composition_raw"`
+	Form                 *string    `json:"form"`
+	Route                *string    `json:"route"`
+	StrengthRaw          *string    `json:"strength_raw"`
+	PackSize             *string    `json:"pack_size"`
+	AtcCode              *string    `json:"atc_code"`
+	ApprovedAt           *time.Time `json:"approved_at"`
+	ExpiresAt            *time.Time `json:"expires_at"`
+	SmpcUrl              *string    `json:"smpc_url"`
+	Raw                  []byte     `json:"raw"`
+	PayloadHash          string     `json:"payload_hash"`
+	FetchedAt            time.Time  `json:"fetched_at"`
+	UpdatedAt            time.Time  `json:"updated_at"`
 }
 
 type ProductIngredient struct {
@@ -68,13 +68,13 @@ type SmpcSection struct {
 }
 
 type SyncRun struct {
-	ID          int64              `json:"id"`
-	StartedAt   pgtype.Timestamptz `json:"started_at"`
-	FinishedAt  *time.Time         `json:"finished_at"`
-	Status      string             `json:"status"`
-	RowsSeen    int32              `json:"rows_seen"`
-	RowsAdded   int32              `json:"rows_added"`
-	RowsChanged int32              `json:"rows_changed"`
-	RowsFailed  int32              `json:"rows_failed"`
-	Error       *string            `json:"error"`
+	ID          int64      `json:"id"`
+	StartedAt   time.Time  `json:"started_at"`
+	FinishedAt  *time.Time `json:"finished_at"`
+	Status      string     `json:"status"`
+	RowsSeen    int32      `json:"rows_seen"`
+	RowsAdded   int32      `json:"rows_added"`
+	RowsChanged int32      `json:"rows_changed"`
+	RowsFailed  int32      `json:"rows_failed"`
+	Error       *string    `json:"error"`
 }

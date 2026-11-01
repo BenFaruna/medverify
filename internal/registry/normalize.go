@@ -70,10 +70,10 @@ func ValidNRN(raw string) bool {
 // Strength is a parsed strength expression. Raw always holds the input. Value,
 // Unit, and PerUnit are nil/empty when the expression could not be parsed.
 type Strength struct {
-	Raw     string
-	Value   *float64
-	Unit    string
-	PerUnit string
+	Raw     string   `json:"raw"`
+	Value   *float64 `json:"value,omitempty"`
+	Unit    string   `json:"unit,omitempty"`
+	PerUnit string   `json:"per_unit,omitempty"`
 }
 
 // Parsed reports whether the numeric part was understood.
