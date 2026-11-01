@@ -6,12 +6,48 @@ package dbgen
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
+	CountProductIngredients(ctx context.Context) (int64, error)
+	CountProducts(ctx context.Context) (int64, error)
+	CountProductsWithLeafletURL(ctx context.Context) (int64, error)
+	CountSMPCDocumentsByStatus(ctx context.Context) ([]CountSMPCDocumentsByStatusRow, error)
+	CountSMPCSections(ctx context.Context) (int64, error)
+	DeleteProductIngredients(ctx context.Context, productID int64) error
+	DeleteSMPCSections(ctx context.Context, documentID int64) error
+	FinishSyncRun(ctx context.Context, arg FinishSyncRunParams) error
+	GetProductByNRN(ctx context.Context, nrn *string) (Product, error)
+	GetProductBySourceID(ctx context.Context, sourceID string) (Product, error)
+	GetSMPCDocument(ctx context.Context, arg GetSMPCDocumentParams) (SmpcDocument, error)
+	InsertProductIngredient(ctx context.Context, arg InsertProductIngredientParams) error
+	InsertSMPCSection(ctx context.Context, arg InsertSMPCSectionParams) error
+	LastSuccessfulSyncRun(ctx context.Context) (SyncRun, error)
+	LatestSyncRun(ctx context.Context) (SyncRun, error)
+	ListProductIngredients(ctx context.Context, productID int64) ([]ProductIngredient, error)
+	ListProductsByIngredient(ctx context.Context, arg ListProductsByIngredientParams) ([]Product, error)
+	// Products whose leaflet is missing, failed, or older than the product record.
+	// Successful, scanned, and oversized documents are not re-downloaded every
+	// night unless the product itself changed.
+	ListProductsForLeafletSync(ctx context.Context, rowLimit int32) ([]ListProductsForLeafletSyncRow, error)
+	ListRecentSyncRuns(ctx context.Context, rowLimit int32) ([]SyncRun, error)
+	ListSMPCSections(ctx context.Context, documentID int64) ([]SmpcSection, error)
 	// Used by readiness probes and by smoke tests. It keeps the sqlc pipeline
 	// exercised until phase 02 adds real tables and queries.
 	Ping(ctx context.Context) (int64, error)
+	// Trigram search ranked by similarity. The pg_trgm % operator keeps the index
+	// usable; similarity() orders the results so typos and word-order changes rank
+	// below exact matches.
+	SearchProductsByName(ctx context.Context, arg SearchProductsByNameParams) ([]SearchProductsByNameRow, error)
+	StartSyncRun(ctx context.Context, startedAt pgtype.Timestamptz) (SyncRun, error)
+	// Queries for the Greenbook registry. Hand-written SQL only; sqlc compiles it.
+	// Insert or update a product when its payload hash changed. The xmax trick
+	// reports whether the row was inserted (true) or updated (false). No row is
+	// returned when the hash is unchanged, which callers treat as a no-op.
+	UpsertProduct(ctx context.Context, arg UpsertProductParams) (UpsertProductRow, error)
+	UpsertSMPCDocument(ctx context.Context, arg UpsertSMPCDocumentParams) (SmpcDocument, error)
 }
 
 var _ Querier = (*Queries)(nil)

@@ -40,9 +40,25 @@ func TestMigrationsStatusReportsApplied(t *testing.T) {
 
 	statuses, err := migrations.Status(ctx, databaseURL)
 	require.NoError(t, err)
-	require.Len(t, statuses, 1)
-	assert.Equal(t, "applied", string(statuses[0].State))
+	require.Len(t, statuses, 2)
+	for _, status := range statuses {
+		assert.Equal(t, "applied", string(status.State))
+	}
 	assert.Equal(t, int64(1), statuses[0].Source.Version)
+	assert.Equal(t, int64(2), statuses[1].Source.Version)
+}
+
+func TestRegistryTablesExistAfterMigrateUp(t *testing.T) {
+	databaseURL := testkit.Postgres(t)
+	ctx := context.Background()
+
+	require.NoError(t, migrations.Up(ctx, databaseURL))
+
+	for _, table := range []string{
+		"products", "product_ingredients", "sync_runs", "smpc_documents", "smpc_sections",
+	} {
+		assert.True(t, tableExists(t, databaseURL, table), "table %s should exist", table)
+	}
 }
 
 func extensions(t *testing.T, databaseURL string) []string {

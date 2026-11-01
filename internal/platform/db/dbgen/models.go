@@ -3,3 +3,78 @@
 //   sqlc v1.30.0
 
 package dbgen
+
+import (
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+)
+
+type Product struct {
+	ID                   int64              `json:"id"`
+	SourceID             string             `json:"source_id"`
+	Nrn                  *string            `json:"nrn"`
+	Name                 string             `json:"name"`
+	Category             *string            `json:"category"`
+	Status               string             `json:"status"`
+	Applicant            *string            `json:"applicant"`
+	Manufacturer         *string            `json:"manufacturer"`
+	ManufacturerSourceID *string            `json:"manufacturer_source_id"`
+	CompositionRaw       *string            `json:"composition_raw"`
+	Form                 *string            `json:"form"`
+	Route                *string            `json:"route"`
+	StrengthRaw          *string            `json:"strength_raw"`
+	PackSize             *string            `json:"pack_size"`
+	AtcCode              *string            `json:"atc_code"`
+	ApprovedAt           *time.Time         `json:"approved_at"`
+	ExpiresAt            *time.Time         `json:"expires_at"`
+	SmpcUrl              *string            `json:"smpc_url"`
+	Raw                  []byte             `json:"raw"`
+	PayloadHash          string             `json:"payload_hash"`
+	FetchedAt            pgtype.Timestamptz `json:"fetched_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ProductIngredient struct {
+	ID            int64    `json:"id"`
+	ProductID     int64    `json:"product_id"`
+	NameRaw       string   `json:"name_raw"`
+	NameNorm      string   `json:"name_norm"`
+	StrengthValue *float64 `json:"strength_value"`
+	StrengthUnit  *string  `json:"strength_unit"`
+	PerUnit       *string  `json:"per_unit"`
+	StrengthRaw   *string  `json:"strength_raw"`
+}
+
+type SmpcDocument struct {
+	ID               int64      `json:"id"`
+	ProductID        int64      `json:"product_id"`
+	SourceUrl        string     `json:"source_url"`
+	Sha256           *string    `json:"sha256"`
+	StorageKey       *string    `json:"storage_key"`
+	FetchedAt        *time.Time `json:"fetched_at"`
+	ExtractionMethod *string    `json:"extraction_method"`
+	Status           string     `json:"status"`
+	Error            *string    `json:"error"`
+}
+
+type SmpcSection struct {
+	ID          int64       `json:"id"`
+	DocumentID  int64       `json:"document_id"`
+	SectionCode *string     `json:"section_code"`
+	Heading     *string     `json:"heading"`
+	Text        string      `json:"text"`
+	PageStart   pgtype.Int4 `json:"page_start"`
+}
+
+type SyncRun struct {
+	ID          int64              `json:"id"`
+	StartedAt   pgtype.Timestamptz `json:"started_at"`
+	FinishedAt  *time.Time         `json:"finished_at"`
+	Status      string             `json:"status"`
+	RowsSeen    int32              `json:"rows_seen"`
+	RowsAdded   int32              `json:"rows_added"`
+	RowsChanged int32              `json:"rows_changed"`
+	RowsFailed  int32              `json:"rows_failed"`
+	Error       *string            `json:"error"`
+}
