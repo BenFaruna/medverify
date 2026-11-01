@@ -37,6 +37,22 @@ func TestLoadFromValidEnvironment(t *testing.T) {
 	assert.Equal(t, "medverify", cfg.Storage.Bucket)
 	assert.False(t, cfg.Storage.UseSSL)
 	assert.Equal(t, 4, cfg.Jobs.Concurrency)
+
+	assert.True(t, cfg.Greenbook.Enabled)
+	assert.Equal(t, "https://greenbook.nafdac.gov.ng", cfg.Greenbook.BaseURL)
+	assert.Equal(t, 1.0, cfg.Greenbook.RequestsPerSecond)
+	assert.Equal(t, 100, cfg.Greenbook.PageSize)
+	assert.Equal(t, 3, cfg.Greenbook.Retries)
+	assert.Equal(t, time.Hour, cfg.Greenbook.CacheTTL)
+	assert.Equal(t, int64(50<<20), cfg.Greenbook.MaxPDFBytes)
+	assert.Equal(t, 100, cfg.Greenbook.MaxPDFPages)
+	assert.ElementsMatch(t,
+		[]string{"greenbook.nafdac.gov.ng", "admin.greenbook.nafdac.gov.ng"},
+		cfg.Greenbook.AllowedHosts,
+	)
+	assert.Equal(t, 24*time.Hour, cfg.Greenbook.SyncInterval)
+	assert.Equal(t, 30.0, cfg.Greenbook.AnomalyMaxDropPercent)
+	assert.Equal(t, 10.0, cfg.Greenbook.AnomalyMaxParseFailurePercent)
 }
 
 func TestLoadFromOverridesDefaults(t *testing.T) {
@@ -52,6 +68,15 @@ func TestLoadFromOverridesDefaults(t *testing.T) {
 		"DATABASE_MIN_CONNS=5",
 		"STORAGE_USE_SSL=true",
 		"JOBS_CONCURRENCY=8",
+		"GREENBOOK_ENABLED=false",
+		"GREENBOOK_BASE_URL=http://localhost:9001",
+		"GREENBOOK_RPS=0.5",
+		"GREENBOOK_PAGE_SIZE=50",
+		"GREENBOOK_RETRIES=1",
+		"GREENBOOK_CACHE_TTL=10m",
+		"GREENBOOK_ALLOWED_HOSTS=example.test",
+		"GREENBOOK_SYNC_INTERVAL=6h",
+		"GREENBOOK_ANOMALY_MAX_DROP_PERCENT=50",
 	)
 
 	cfg, err := config.LoadFrom(env)
@@ -66,6 +91,16 @@ func TestLoadFromOverridesDefaults(t *testing.T) {
 	assert.Equal(t, int32(5), cfg.Database.MinConns)
 	assert.True(t, cfg.Storage.UseSSL)
 	assert.Equal(t, 8, cfg.Jobs.Concurrency)
+
+	assert.False(t, cfg.Greenbook.Enabled)
+	assert.Equal(t, "http://localhost:9001", cfg.Greenbook.BaseURL)
+	assert.Equal(t, 0.5, cfg.Greenbook.RequestsPerSecond)
+	assert.Equal(t, 50, cfg.Greenbook.PageSize)
+	assert.Equal(t, 1, cfg.Greenbook.Retries)
+	assert.Equal(t, 10*time.Minute, cfg.Greenbook.CacheTTL)
+	assert.Equal(t, []string{"example.test"}, cfg.Greenbook.AllowedHosts)
+	assert.Equal(t, 6*time.Hour, cfg.Greenbook.SyncInterval)
+	assert.Equal(t, 50.0, cfg.Greenbook.AnomalyMaxDropPercent)
 }
 
 func TestLoadFromMissingRequiredListsEveryProblem(t *testing.T) {
@@ -102,6 +137,17 @@ func TestLoadFromMalformedValuesListsEveryProblem(t *testing.T) {
 		"DATABASE_URL=mysql://localhost/db",
 		"STORAGE_USE_SSL=maybe",
 		"JOBS_CONCURRENCY=0",
+		"GREENBOOK_BASE_URL=greenbook",
+		"GREENBOOK_RPS=fast",
+		"GREENBOOK_PAGE_SIZE=0",
+		"GREENBOOK_RETRIES=-1",
+		"GREENBOOK_CACHE_TTL=soon",
+		"GREENBOOK_MAX_PDF_BYTES=big",
+		"GREENBOOK_MAX_PDF_PAGES=0",
+		"GREENBOOK_ALLOWED_HOSTS= , ",
+		"GREENBOOK_SYNC_INTERVAL=nightly",
+		"GREENBOOK_ANOMALY_MAX_DROP_PERCENT=100",
+		"GREENBOOK_ANOMALY_MAX_PARSE_FAILURE_PERCENT=-1",
 	)
 
 	_, err := config.LoadFrom(env)
@@ -124,6 +170,17 @@ func TestLoadFromMalformedValuesListsEveryProblem(t *testing.T) {
 		"DATABASE_URL",
 		"STORAGE_USE_SSL",
 		"JOBS_CONCURRENCY",
+		"GREENBOOK_BASE_URL",
+		"GREENBOOK_RPS",
+		"GREENBOOK_PAGE_SIZE",
+		"GREENBOOK_RETRIES",
+		"GREENBOOK_CACHE_TTL",
+		"GREENBOOK_MAX_PDF_BYTES",
+		"GREENBOOK_MAX_PDF_PAGES",
+		"GREENBOOK_ALLOWED_HOSTS",
+		"GREENBOOK_SYNC_INTERVAL",
+		"GREENBOOK_ANOMALY_MAX_DROP_PERCENT",
+		"GREENBOOK_ANOMALY_MAX_PARSE_FAILURE_PERCENT",
 	}, fields)
 }
 

@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -39,12 +40,13 @@ func (e Environment) Valid() bool {
 
 // Config is the fully parsed configuration for one process.
 type Config struct {
-	Env      Environment
-	LogLevel string
-	HTTP     HTTP
-	Database Database
-	Storage  Storage
-	Jobs     Jobs
+	Env       Environment
+	LogLevel  string
+	HTTP      HTTP
+	Database  Database
+	Storage   Storage
+	Jobs      Jobs
+	Greenbook Greenbook
 }
 
 // HTTP holds the HTTP server settings.
@@ -80,6 +82,27 @@ type Storage struct {
 type Jobs struct {
 	Concurrency     int
 	ShutdownTimeout time.Duration
+}
+
+// Greenbook holds the NAFDAC Greenbook ingestion settings. The kill switch is
+// Enabled=false: the fetcher refuses every outbound call, including retries.
+type Greenbook struct {
+	Enabled                       bool
+	BaseURL                       string
+	UserAgent                     string
+	RequestsPerSecond             float64
+	MaxConcurrency                int
+	PageSize                      int
+	RequestTimeout                time.Duration
+	Retries                       int
+	CacheDir                      string
+	CacheTTL                      time.Duration
+	MaxPDFBytes                   int64
+	MaxPDFPages                   int
+	AllowedHosts                  []string
+	SyncInterval                  time.Duration
+	AnomalyMaxDropPercent         float64
+	AnomalyMaxParseFailurePercent float64
 }
 
 // Problem is one invalid or missing configuration value. Values are never
@@ -157,11 +180,33 @@ func LoadFrom(environ []string) (Config, error) {
 			Concurrency:     l.positiveInt("JOBS_CONCURRENCY", 4),
 			ShutdownTimeout: l.duration("JOBS_SHUTDOWN_TIMEOUT", 15*time.Second),
 		},
+		Greenbook: Greenbook{
+			Enabled:                       l.boolean("GREENBOOK_ENABLED", true),
+			BaseURL:                       l.str("GREENBOOK_BASE_URL", "https://greenbook.nafdac.gov.ng"),
+			UserAgent:                     l.str("GREENBOOK_USER_AGENT", "MedVerifyNG/0.1 (+https://github.com/benfaruna/medverify)"),
+			RequestsPerSecond:             l.positiveFloat("GREENBOOK_RPS", 1),
+			MaxConcurrency:                l.positiveInt("GREENBOOK_MAX_CONCURRENCY", 2),
+			PageSize:                      l.positiveInt("GREENBOOK_PAGE_SIZE", 100),
+			RequestTimeout:                l.duration("GREENBOOK_REQUEST_TIMEOUT", 30*time.Second),
+			Retries:                       l.nonNegativeInt("GREENBOOK_RETRIES", 3),
+			CacheDir:                      l.str("GREENBOOK_CACHE_DIR", filepath.Join(os.TempDir(), "medverify-greenbook-cache")),
+			CacheTTL:                      l.duration("GREENBOOK_CACHE_TTL", time.Hour),
+			MaxPDFBytes:                   l.bytes("GREENBOOK_MAX_PDF_BYTES", 50<<20),
+			MaxPDFPages:                   l.positiveInt("GREENBOOK_MAX_PDF_PAGES", 100),
+			AllowedHosts:                  l.csv("GREENBOOK_ALLOWED_HOSTS", "greenbook.nafdac.gov.ng,admin.greenbook.nafdac.gov.ng"),
+			SyncInterval:                  l.duration("GREENBOOK_SYNC_INTERVAL", 24*time.Hour),
+			AnomalyMaxDropPercent:         l.percent("GREENBOOK_ANOMALY_MAX_DROP_PERCENT", 30),
+			AnomalyMaxParseFailurePercent: l.percent("GREENBOOK_ANOMALY_MAX_PARSE_FAILURE_PERCENT", 10),
+		},
 	}
 
 	l.validateURL("DATABASE_URL", cfg.Database.URL)
+	l.validateHTTPURL("GREENBOOK_BASE_URL", cfg.Greenbook.BaseURL)
 	if cfg.Database.MinConns > cfg.Database.MaxConns {
 		l.add("DATABASE_MIN_CONNS", "must not be greater than DATABASE_MAX_CONNS")
+	}
+	if len(cfg.Greenbook.AllowedHosts) == 0 {
+		l.add("GREENBOOK_ALLOWED_HOSTS", "must list at least one leaflet host")
 	}
 
 	if len(l.problems) > 0 {
@@ -276,6 +321,56 @@ func (l *loader) positiveInt(key string, fallback int) int {
 	return parsed
 }
 
+func (l *loader) positiveFloat(key string, fallback float64) float64 {
+	value, ok := l.raw(key)
+	if !ok {
+		return fallback
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		l.add(key, "must be a number")
+		return fallback
+	}
+	if parsed <= 0 {
+		l.add(key, "must be greater than zero")
+		return fallback
+	}
+	return parsed
+}
+
+func (l *loader) percent(key string, fallback float64) float64 {
+	value, ok := l.raw(key)
+	if !ok {
+		return fallback
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		l.add(key, "must be a percentage")
+		return fallback
+	}
+	if parsed < 0 || parsed >= 100 {
+		l.add(key, "must be between 0 and 100 (exclusive)")
+		return fallback
+	}
+	return parsed
+}
+
+func (l *loader) csv(key, fallback string) []string {
+	value, ok := l.raw(key)
+	if !ok {
+		value = fallback
+	}
+	parts := strings.Split(value, ",")
+	items := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			items = append(items, part)
+		}
+	}
+	return items
+}
+
 func (l *loader) nonNegativeInt(key string, fallback int) int {
 	parsed, ok := l.int(key)
 	if !ok {
@@ -338,6 +433,16 @@ func (l *loader) validateURL(key, value string) {
 	u, err := url.Parse(value)
 	if err != nil || u.Host == "" || (u.Scheme != "postgres" && u.Scheme != "postgresql") {
 		l.add(key, "must be a postgres:// or postgresql:// URL with a host")
+	}
+}
+
+func (l *loader) validateHTTPURL(key, value string) {
+	if value == "" {
+		return
+	}
+	u, err := url.Parse(value)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		l.add(key, "must be an http:// or https:// URL with a host")
 	}
 }
 
