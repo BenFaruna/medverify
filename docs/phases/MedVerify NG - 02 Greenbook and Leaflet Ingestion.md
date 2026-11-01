@@ -6,7 +6,7 @@
 
 ## 1. Deliverables checklist
 
-- [ ] Spike report: captured sample payloads and a written description of the real field names and formats
+- [x] Spike report: captured sample payloads and a written description of the real field names and formats
 - [ ] Greenbook fetcher with throttling, retries, caching, and a kill switch
 - [ ] Parser from raw payload to domain structs
 - [ ] NormalizeNRN, NormalizeIngredient, ParseStrength functions with a synonym table
@@ -37,24 +37,31 @@
 4. Provide a worker image that contains pdftotext.
 5. Create config for: base URL, requests per second, max concurrency, max PDF size, allowlisted hosts, sync schedule, kill switch.
 
-## 4. Data model (adjust after the spike)
+## 4. Data model (adjusted after the spike)
+
+The spike changed the model: NRN is not always present, so `source_id`
+(Greenbook `product_id`) is the key and `nrn` is nullable. See the
+[spike report](MedVerify%20NG%20-%2002-spike-report.md#3-schema-changes-forced-by-the-spike)
+for the full list of changes.
 
 ```sql
 CREATE TABLE products (
   id bigserial PRIMARY KEY,
-  nrn text NOT NULL UNIQUE,
+  source_id text NOT NULL UNIQUE,          -- Greenbook product_id
+  nrn text UNIQUE,                          -- nullable: some products have no NRN
   name text NOT NULL,
   category text,
   status text NOT NULL,
   applicant text,
   manufacturer text,
+  manufacturer_source_id text,
   composition_raw text,
   form text, route text, strength_raw text, pack_size text,
   atc_code text,
-  approved_at date, expires_at date,
+  approved_at timestamptz, expires_at timestamptz,
   smpc_url text,
-  source_id text,
   raw jsonb NOT NULL,
+  payload_hash text NOT NULL,
   fetched_at timestamptz NOT NULL,
   updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -65,21 +72,25 @@ CREATE TABLE product_ingredients (
   product_id bigint NOT NULL REFERENCES products(id) ON DELETE CASCADE,
   name_raw text NOT NULL,
   name_norm text NOT NULL,
-  strength_value numeric, strength_unit text, per_unit text,
-  UNIQUE (product_id, name_norm, strength_value, strength_unit)
+  strength_value double precision,
+  strength_unit text, per_unit text, strength_raw text,
+  UNIQUE NULLS NOT DISTINCT (product_id, name_norm, strength_value, strength_unit)
 );
 CREATE INDEX ON product_ingredients (name_norm);
 
 CREATE TABLE sync_runs (
   id bigserial PRIMARY KEY, started_at timestamptz, finished_at timestamptz,
-  status text, rows_seen int, rows_added int, rows_changed int, error text
+  status text, rows_seen int, rows_added int, rows_changed int, rows_failed int,
+  error text
 );
 
 CREATE TABLE smpc_documents (
   id bigserial PRIMARY KEY, product_id bigint REFERENCES products(id),
   source_url text NOT NULL, sha256 text, storage_key text,
   fetched_at timestamptz, extraction_method text,
-  status text NOT NULL  -- ok | scanned_needs_ocr | failed | too_large
+  status text NOT NULL,  -- ok | scanned_needs_ocr | failed | too_large
+  error text,
+  UNIQUE (product_id, source_url)
 );
 
 CREATE TABLE smpc_sections (
