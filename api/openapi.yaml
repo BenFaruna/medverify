@@ -1,0 +1,145 @@
+openapi: 3.1.0
+info:
+  title: MedVerify NG API
+  version: 0.1.0
+  description: |
+    MedVerify NG checks a photographed medicine pack against NAFDAC records and
+    a curated watchlist, then returns an explainable verdict.
+
+    Phase 1 exposes operational endpoints only. Every error response uses
+    RFC 7807 problem details with a stable `code` field; clients branch on
+    `code`, never on `detail`.
+
+    The API never declares a medicine safe, genuine, or authentic.
+servers:
+  - url: http://localhost:8080
+    description: Local docker compose stack
+tags:
+  - name: operations
+    description: Liveness and readiness probes
+
+paths:
+  /healthz:
+    get:
+      operationId: getHealth
+      summary: Liveness
+      description: |
+        Reports that the process is alive. It never checks a dependency, so a
+        database outage cannot cause a container restart.
+      tags: [operations]
+      responses:
+        "200":
+          description: Process is alive.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /readyz:
+    get:
+      operationId: getReadiness
+      summary: Readiness
+      description: |
+        Checks Postgres and object storage. Returns 200 only when every
+        dependency responds within the readiness timeout; otherwise 503 with a
+        problem detail naming the unavailable dependencies.
+      tags: [operations]
+      responses:
+        "200":
+          description: Every dependency is reachable.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+            Cache-Control:
+              description: Always `no-store`; readiness is never cached.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessResponse"
+        "503":
+          description: At least one dependency is unreachable.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+components:
+  headers:
+    X-Request-Id:
+      description: Correlation ID for this request. Echoed from the client when well formed.
+      schema:
+        type: string
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          const: ok
+    ReadinessResponse:
+      type: object
+      required: [status, checks]
+      properties:
+        status:
+          type: string
+          const: ready
+        checks:
+          type: object
+          additionalProperties:
+            type: string
+            enum: [ok, unavailable]
+          example:
+            database: ok
+            storage: ok
+    Problem:
+      type: object
+      description: RFC 7807 problem details with a stable machine code.
+      required: [type, title, status, code]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: A URI identifying the problem type; ends with the machine code.
+          example: https://medverify.ng/problems/unavailable
+        title:
+          type: string
+          description: Short, human readable summary of the problem type.
+          example: Service Unavailable
+        status:
+          type: integer
+          description: HTTP status code, repeated in the body.
+          example: 503
+        detail:
+          type: string
+          description: |
+            Human readable explanation for this occurrence. Never machine
+            parsed and never contains secrets, images, or raw user text.
+        instance:
+          type: string
+          description: Request path that produced the problem.
+          example: /readyz
+        code:
+          type: string
+          description: Stable machine code clients branch on.
+          enum:
+            - bad_request
+            - internal_error
+            - method_not_allowed
+            - not_found
+            - payload_too_large
+            - timeout
+            - unavailable
+      example:
+        type: https://medverify.ng/problems/unavailable
+        title: Service Unavailable
+        status: 503
+        detail: "Unavailable dependencies: storage."
+        instance: /readyz
+        code: unavailable

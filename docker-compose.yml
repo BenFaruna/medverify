@@ -1,0 +1,96 @@
+name: medverify
+
+# Local development stack. Values come from .env (see .env.example); the
+# defaults below work out of the box.
+#
+# Containers talk to each other on the compose network, so their DATABASE_URL
+# and STORAGE_ENDPOINT differ from the ones a process on the host uses.
+#
+# Object storage is a SeaweedFS S3 gateway because MinIO images are no longer
+# publicly pullable. The storage package talks S3, so swapping the provider is a
+# configuration change, not a code change.
+
+x-app-env: &app-env
+  APP_ENV: ${APP_ENV:-development}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  HTTP_ADDR: ":8080"
+  HTTP_REQUEST_TIMEOUT: ${HTTP_REQUEST_TIMEOUT:-15s}
+  HTTP_SHUTDOWN_TIMEOUT: ${HTTP_SHUTDOWN_TIMEOUT:-10s}
+  HTTP_MAX_BODY_BYTES: ${HTTP_MAX_BODY_BYTES:-1048576}
+  DATABASE_URL: postgres://${POSTGRES_USER:-medverify}:${POSTGRES_PASSWORD:-medverify-local-password}@postgres:5432/${POSTGRES_DB:-medverify}?sslmode=disable
+  STORAGE_ENDPOINT: storage:8333
+  STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-medverify-dev}
+  STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-medverify-dev-secret}
+  STORAGE_BUCKET: ${STORAGE_BUCKET:-medverify}
+  JOBS_CONCURRENCY: ${JOBS_CONCURRENCY:-4}
+  JOBS_SHUTDOWN_TIMEOUT: ${JOBS_SHUTDOWN_TIMEOUT:-15s}
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-medverify}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-medverify-local-password}
+      POSTGRES_DB: ${POSTGRES_DB:-medverify}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-medverify} -d ${POSTGRES_DB:-medverify}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  storage:
+    image: chrislusf/seaweedfs:latest
+    command: server -s3 -s3.port=8333 -dir=/data
+    ports:
+      # Host port 9000 keeps the familiar S3 endpoint; the container listens on
+      # 8333, which is what STORAGE_ENDPOINT uses inside the compose network.
+      - "${STORAGE_PORT:-9000}:8333"
+    volumes:
+      - storage-data:/data
+
+  # Migrations and bucket creation run once, before api and worker start.
+  init:
+    build: .
+    command:
+      - /bin/sh
+      - -c
+      - |
+        until /app/admin migrate up; do echo "waiting for postgres"; sleep 2; done
+        until /app/admin storage init; do echo "waiting for object storage"; sleep 2; done
+    environment: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      storage:
+        condition: service_started
+
+  api:
+    build: .
+    command: ["/app/api"]
+    environment: *app-env
+    ports:
+      - "${HTTP_PORT:-8080}:8080"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  worker:
+    build: .
+    command: ["/app/worker"]
+    environment: *app-env
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+volumes:
+  postgres-data:
+  storage-data:

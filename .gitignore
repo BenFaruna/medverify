@@ -1,0 +1,13 @@
+.env
+.freebuff/
+
+# Build output
+/bin/
+/coverage.out
+/eval-results/
+
+# Local tooling
+.DS_Store
+.idea/
+.vscode/
+*.test
