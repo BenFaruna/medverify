@@ -8,8 +8,6 @@ package dbgen
 import (
 	"context"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const countProductIngredients = `-- name: CountProductIngredients :one
@@ -281,11 +279,11 @@ VALUES (
 `
 
 type InsertSMPCSectionParams struct {
-	DocumentID  int64       `json:"document_id"`
-	SectionCode *string     `json:"section_code"`
-	Heading     *string     `json:"heading"`
-	Text        string      `json:"text"`
-	PageStart   pgtype.Int4 `json:"page_start"`
+	DocumentID  int64   `json:"document_id"`
+	SectionCode *string `json:"section_code"`
+	Heading     *string `json:"heading"`
+	Text        string  `json:"text"`
+	PageStart   *int32  `json:"page_start"`
 }
 
 func (q *Queries) InsertSMPCSection(ctx context.Context, arg InsertSMPCSectionParams) error {

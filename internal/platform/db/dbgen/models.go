@@ -6,8 +6,6 @@ package dbgen
 
 import (
 	"time"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Product struct {
@@ -59,12 +57,12 @@ type SmpcDocument struct {
 }
 
 type SmpcSection struct {
-	ID          int64       `json:"id"`
-	DocumentID  int64       `json:"document_id"`
-	SectionCode *string     `json:"section_code"`
-	Heading     *string     `json:"heading"`
-	Text        string      `json:"text"`
-	PageStart   pgtype.Int4 `json:"page_start"`
+	ID          int64   `json:"id"`
+	DocumentID  int64   `json:"document_id"`
+	SectionCode *string `json:"section_code"`
+	Heading     *string `json:"heading"`
+	Text        string  `json:"text"`
+	PageStart   *int32  `json:"page_start"`
 }
 
 type SyncRun struct {

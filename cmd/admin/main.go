@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"text/tabwriter"
 	"time"
@@ -37,6 +38,8 @@ commands:
   job noop [message]    enqueue a no-op job for the worker
   sync greenbook [--override-anomaly]
                         run a full Greenbook sync now
+  sync leaflets [--limit N]
+                        download, extract, and split pending leaflets
 `
 
 func main() {
@@ -186,12 +189,22 @@ func jobCommand(ctx context.Context, cfg config.Config, args []string) error {
 }
 
 func syncCommand(ctx context.Context, cfg config.Config, args []string) error {
-	if len(args) == 0 || args[0] != "greenbook" {
-		return fmt.Errorf("sync requires the source: greenbook")
+	if len(args) == 0 {
+		return fmt.Errorf("sync requires a source: greenbook or leaflets")
 	}
+	switch args[0] {
+	case "greenbook":
+		return syncGreenbook(ctx, cfg, args[1:])
+	case "leaflets":
+		return syncLeaflets(ctx, cfg, args[1:])
+	default:
+		return fmt.Errorf("unknown sync source %q", args[0])
+	}
+}
 
+func syncGreenbook(ctx context.Context, cfg config.Config, args []string) error {
 	override := false
-	for _, arg := range args[1:] {
+	for _, arg := range args {
 		switch arg {
 		case "--override-anomaly":
 			override = true
@@ -219,6 +232,53 @@ func syncCommand(ctx context.Context, cfg config.Config, args []string) error {
 	return syncErr
 }
 
+func syncLeaflets(ctx context.Context, cfg config.Config, args []string) error {
+	limit := 500
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--limit":
+			if i+1 >= len(args) {
+				return fmt.Errorf("--limit requires a number")
+			}
+			parsed, err := strconv.Atoi(args[i+1])
+			if err != nil || parsed <= 0 {
+				return fmt.Errorf("--limit must be a positive integer")
+			}
+			limit = parsed
+			i++
+		default:
+			return fmt.Errorf("unknown sync option %q", args[i])
+		}
+	}
+
+	pool, err := db.Open(cfg.Database)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	objects, err := storage.NewS3(storage.Options{
+		Endpoint:  cfg.Storage.Endpoint,
+		AccessKey: cfg.Storage.AccessKey,
+		SecretKey: cfg.Storage.SecretKey,
+		Bucket:    cfg.Storage.Bucket,
+		Region:    cfg.Storage.Region,
+		UseSSL:    cfg.Storage.UseSSL,
+	})
+	if err != nil {
+		return err
+	}
+
+	pipeline, err := registry.NewLeafletPipelineFromConfig(pool, cfg.Greenbook, objects, slog.Default())
+	if err != nil {
+		return err
+	}
+
+	summary, runErr := pipeline.Run(ctx, limit)
+	printLeafletSummary(summary)
+	return runErr
+}
+
 func printSyncSummary(summary registry.SyncSummary) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintf(w, "run\t%d\n", summary.RunID)
@@ -231,5 +291,18 @@ func printSyncSummary(summary registry.SyncSummary) {
 		_, _ = fmt.Fprintf(w, "anomaly\t%s\n", summary.Anomaly.Error())
 	}
 	_, _ = fmt.Fprintf(w, "unknown ingredient names\t%d\n", len(summary.UnknownIngredients))
+	_ = w.Flush()
+}
+
+func printLeafletSummary(summary registry.LeafletSummary) {
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintf(w, "candidates\t%d\n", summary.Candidates)
+	_, _ = fmt.Fprintf(w, "downloaded\t%d\n", summary.Downloaded)
+	_, _ = fmt.Fprintf(w, "skipped (unchanged)\t%d\n", summary.Skipped)
+	_, _ = fmt.Fprintf(w, "ok\t%d\n", summary.OK)
+	_, _ = fmt.Fprintf(w, "scanned (needs OCR)\t%d\n", summary.ScannedNeedsOCR)
+	_, _ = fmt.Fprintf(w, "too large\t%d\n", summary.TooLarge)
+	_, _ = fmt.Fprintf(w, "failed\t%d\n", summary.Failed)
+	_, _ = fmt.Fprintf(w, "sections stored\t%d\n", summary.Sections)
 	_ = w.Flush()
 }

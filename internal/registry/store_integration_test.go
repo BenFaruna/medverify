@@ -123,6 +123,51 @@ func TestSyncRecordsParseFailuresAndAbortsOverPolicy(t *testing.T) {
 	assert.Equal(t, 0, countRows(t, pool, "products"))
 }
 
+func TestLeafletStorageRoundTrip(t *testing.T) {
+	pool, store := integrationStore(t)
+	ctx := context.Background()
+
+	product := parseFixture(t, "drugs_p1.json").Products[0]
+	product.SmpcURL = "https://admin.greenbook.nafdac.gov.ng/leaflet.pdf"
+	_, err := store.UpsertProduct(ctx, product)
+	require.NoError(t, err)
+
+	targets, err := store.ListProductsForLeafletSync(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, targets, 1)
+	assert.Equal(t, product.SourceID, targets[0].SourceID)
+	assert.Equal(t, product.SmpcURL, targets[0].URL)
+
+	fetchedAt := time.Now().UTC()
+	docID, err := store.SaveSMPCDocument(ctx, registry.SMPCDocument{
+		ProductID:        targets[0].ProductID,
+		SourceURL:        targets[0].URL,
+		SHA256:           "abc123",
+		StorageKey:       "leaflets/x/abc123.pdf",
+		FetchedAt:        &fetchedAt,
+		ExtractionMethod: "pdftotext",
+		Status:           registry.LeafletStatusOK,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, store.ReplaceSMPCSections(ctx, docID, []registry.SMPCSection{
+		{Code: "1", Heading: "NAME OF THE MEDICINAL PRODUCT", Text: "Example", PageStart: 1},
+		{Code: "2", Heading: "COMPOSITION", Text: "500 mg", PageStart: 2},
+	}))
+
+	doc, found, err := store.GetSMPCDocument(ctx, targets[0].ProductID, targets[0].URL)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, docID, doc.ID)
+	assert.Equal(t, "abc123", doc.SHA256)
+	assert.Equal(t, 2, countRows(t, pool, "smpc_sections"))
+
+	// A successful document is not selected again; a changed product is.
+	targets, err = store.ListProductsForLeafletSync(ctx, 10)
+	require.NoError(t, err)
+	assert.Empty(t, targets)
+}
+
 func integrationStore(t *testing.T) (*pgxpool.Pool, *registry.Store) {
 	t.Helper()
 
