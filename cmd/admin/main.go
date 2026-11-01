@@ -22,6 +22,7 @@ import (
 	"github.com/benfaruna/medverify/internal/platform/db"
 	"github.com/benfaruna/medverify/internal/platform/jobs"
 	"github.com/benfaruna/medverify/internal/platform/logging"
+	"github.com/benfaruna/medverify/internal/registry"
 	"github.com/benfaruna/medverify/internal/storage"
 	"github.com/benfaruna/medverify/migrations"
 )
@@ -34,6 +35,8 @@ commands:
   migrate status        list migrations and whether they are applied
   storage init          create the configured bucket if missing
   job noop [message]    enqueue a no-op job for the worker
+  sync greenbook [--override-anomaly]
+                        run a full Greenbook sync now
 `
 
 func main() {
@@ -72,6 +75,8 @@ func run(args []string) error {
 		return storageCommand(ctx, cfg, args[1:])
 	case "job":
 		return jobCommand(ctx, cfg, args[1:])
+	case "sync":
+		return syncCommand(ctx, cfg, args[1:])
 	case "help", "-h", "--help":
 		_, _ = fmt.Fprint(os.Stdout, usage)
 		return nil
@@ -178,4 +183,53 @@ func jobCommand(ctx context.Context, cfg config.Config, args []string) error {
 	}
 	_, _ = fmt.Fprintf(os.Stdout, "enqueued noop job %d\n", id)
 	return nil
+}
+
+func syncCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) == 0 || args[0] != "greenbook" {
+		return fmt.Errorf("sync requires the source: greenbook")
+	}
+
+	override := false
+	for _, arg := range args[1:] {
+		switch arg {
+		case "--override-anomaly":
+			override = true
+		default:
+			return fmt.Errorf("unknown sync option %q", arg)
+		}
+	}
+
+	pool, err := db.Open(cfg.Database)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	syncer, err := registry.NewSyncerFromConfig(pool, cfg.Greenbook, slog.Default())
+	if err != nil {
+		return err
+	}
+
+	summary, syncErr := syncer.Sync(ctx, registry.SyncOptions{
+		Trigger:         "admin",
+		OverrideAnomaly: override,
+	})
+	printSyncSummary(summary)
+	return syncErr
+}
+
+func printSyncSummary(summary registry.SyncSummary) {
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintf(w, "run\t%d\n", summary.RunID)
+	_, _ = fmt.Fprintf(w, "status\t%s\n", summary.Status)
+	_, _ = fmt.Fprintf(w, "rows seen\t%d\n", summary.RowsSeen)
+	_, _ = fmt.Fprintf(w, "rows added\t%d\n", summary.RowsAdded)
+	_, _ = fmt.Fprintf(w, "rows changed\t%d\n", summary.RowsChanged)
+	_, _ = fmt.Fprintf(w, "rows failed\t%d\n", summary.RowsFailed)
+	if summary.AnomalyOverridden {
+		_, _ = fmt.Fprintf(w, "anomaly\t%s\n", summary.Anomaly.Error())
+	}
+	_, _ = fmt.Fprintf(w, "unknown ingredient names\t%d\n", len(summary.UnknownIngredients))
+	_ = w.Flush()
 }

@@ -7,7 +7,10 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/benfaruna/medverify/internal/platform/clock"
+	"github.com/benfaruna/medverify/internal/platform/config"
 )
 
 // ErrAnomaly marks a sync that stopped before writing because the guard
@@ -71,6 +74,29 @@ func NewSyncer(opts SyncerOptions) (*Syncer, error) {
 		clock:      opts.Clock,
 		logger:     opts.Logger,
 	}, nil
+}
+
+// NewSyncerFromConfig wires the live fetcher, Postgres store, and anomaly
+// policy from application configuration. Both the worker and the admin command
+// use it so a manual sync cannot quietly differ from the nightly one.
+func NewSyncerFromConfig(pool *pgxpool.Pool, cfg config.Greenbook, logger *slog.Logger) (*Syncer, error) {
+	if pool == nil {
+		return nil, fmt.Errorf("greenbook syncer requires a database pool")
+	}
+	fetcher, err := NewFetcher(cfg, logger)
+	if err != nil {
+		return nil, err
+	}
+	return NewSyncer(SyncerOptions{
+		Source: fetcher,
+		Store:  NewStore(pool),
+		Policy: AnomalyPolicy{
+			MaxDropPercent:         cfg.AnomalyMaxDropPercent,
+			MaxParseFailurePercent: cfg.AnomalyMaxParseFailurePercent,
+		},
+		PageSize: cfg.PageSize,
+		Logger:   logger,
+	})
 }
 
 // SyncOptions controls one sync invocation.

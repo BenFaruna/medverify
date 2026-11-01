@@ -50,16 +50,47 @@ func (w *NoopWorker) Work(ctx context.Context, job *river.Job[NoopArgs]) error {
 	return nil
 }
 
+// WorkerOption customises the worker set. The API registers no ingestion
+// runner, so it can enqueue jobs without executing them.
+type WorkerOption func(*workerOptions)
+
+type workerOptions struct {
+	greenbook GreenbookRunner
+}
+
+// WithGreenbookRunner registers the Greenbook sync worker. Without it the job
+// kind is unknown to this process.
+func WithGreenbookRunner(runner GreenbookRunner) WorkerOption {
+	return func(opts *workerOptions) { opts.greenbook = runner }
+}
+
 // NewWorkers registers every worker this build knows about.
-func NewWorkers(logger *slog.Logger) *river.Workers {
+func NewWorkers(logger *slog.Logger, opts ...WorkerOption) *river.Workers {
+	var options workerOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &NoopWorker{Logger: logger})
+	if options.greenbook != nil {
+		river.AddWorker(workers, &GreenbookSyncWorker{Runner: options.greenbook, Logger: logger})
+	}
 	return workers
+}
+
+// ClientOption customises the River client, mainly the periodic schedule.
+type ClientOption func(*river.Config)
+
+// WithPeriodicJobs adds scheduled work. Periodic jobs are enqueued by the
+// elected leader, so only the worker process should configure them.
+func WithPeriodicJobs(jobs []*river.PeriodicJob) ClientOption {
+	return func(cfg *river.Config) { cfg.PeriodicJobs = append(cfg.PeriodicJobs, jobs...) }
 }
 
 // NewClient builds a River client. Callers decide whether to Start it: the API
 // only enqueues, the worker executes.
-func NewClient(pool *pgxpool.Pool, logger *slog.Logger, workers *river.Workers, cfg config.Jobs) (*river.Client[pgx.Tx], error) {
+func NewClient(pool *pgxpool.Pool, logger *slog.Logger, workers *river.Workers, cfg config.Jobs, opts ...ClientOption) (*river.Client[pgx.Tx], error) {
 	if pool == nil {
 		return nil, fmt.Errorf("job client requires a database pool")
 	}
@@ -69,13 +100,18 @@ func NewClient(pool *pgxpool.Pool, logger *slog.Logger, workers *river.Workers, 
 		concurrency = 1
 	}
 
-	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
+	riverConfig := &river.Config{
 		Logger:  logger,
 		Workers: workers,
 		Queues: map[string]river.QueueConfig{
 			river.QueueDefault: {MaxWorkers: concurrency},
 		},
-	})
+	}
+	for _, opt := range opts {
+		opt(riverConfig)
+	}
+
+	client, err := river.NewClient(riverpgxv5.New(pool), riverConfig)
 	if err != nil {
 		return nil, fmt.Errorf("create job client: %w", err)
 	}

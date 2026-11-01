@@ -17,6 +17,7 @@ import (
 	"github.com/benfaruna/medverify/internal/platform/db"
 	"github.com/benfaruna/medverify/internal/platform/jobs"
 	"github.com/benfaruna/medverify/internal/platform/logging"
+	"github.com/benfaruna/medverify/internal/registry"
 )
 
 func main() {
@@ -48,7 +49,18 @@ func run() error {
 	}
 	defer pool.Close()
 
-	client, err := jobs.NewClient(pool, logger, jobs.NewWorkers(logger), cfg.Jobs)
+	workerOpts := []jobs.WorkerOption{}
+	clientOpts := []jobs.ClientOption{}
+	if cfg.Greenbook.Enabled {
+		syncer, err := registry.NewSyncerFromConfig(pool, cfg.Greenbook, logger)
+		if err != nil {
+			return err
+		}
+		workerOpts = append(workerOpts, jobs.WithGreenbookRunner(syncer))
+		clientOpts = append(clientOpts, jobs.WithPeriodicJobs(jobs.GreenbookPeriodicJob(cfg.Greenbook)))
+	}
+
+	client, err := jobs.NewClient(pool, logger, jobs.NewWorkers(logger, workerOpts...), cfg.Jobs, clientOpts...)
 	if err != nil {
 		return err
 	}
@@ -56,7 +68,11 @@ func run() error {
 	if err := client.Start(ctx); err != nil {
 		return fmt.Errorf("start job client: %w", err)
 	}
-	logger.Info("worker started", slog.Int("concurrency", cfg.Jobs.Concurrency))
+	logger.Info("worker started",
+		slog.Int("concurrency", cfg.Jobs.Concurrency),
+		slog.Bool("greenbook_enabled", cfg.Greenbook.Enabled),
+		slog.Duration("greenbook_interval", cfg.Greenbook.SyncInterval),
+	)
 
 	<-ctx.Done()
 	logger.Info("worker shutting down", slog.Duration("grace_period", cfg.Jobs.ShutdownTimeout))
