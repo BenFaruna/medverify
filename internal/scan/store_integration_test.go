@@ -5,6 +5,7 @@ package scan_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"os"
@@ -77,14 +78,23 @@ func TestProcessCompletesWithFakeProvider(t *testing.T) {
 	assert.Equal(t, "fake", finished.Result.Provider)
 	assert.JSONEq(t, "[]", string(finished.Result.Reasons))
 	assert.Nil(t, finished.Result.Verdict)
-	assert.Nil(t, finished.Result.Extracted)
+	assert.NotNil(t, finished.Result.Extracted)
 	assert.NotNil(t, finished.CompletedAt)
+
+	var extracted vision.LabelData
+	require.NoError(t, json.Unmarshal(finished.Result.Extracted, &extracted))
+	require.NotNil(t, extracted.NRN.Value)
+	assert.Equal(t, "01-2345", *extracted.NRN.Value)
+	require.NotNil(t, extracted.ExpiryDate.Value)
+	assert.Equal(t, "2028-01", extracted.ExpiryDate.Value.Format())
+	assert.Equal(t, "fake", extracted.Provider)
+	assert.Equal(t, "fake", extracted.PromptVersion)
 
 	view := finished.View()
 	assert.Equal(t, scan.StatusCompleted, view.Status)
 	assert.Nil(t, view.Verdict)
 	assert.JSONEq(t, "[]", string(view.Reasons))
-	assert.Nil(t, view.Extracted)
+	assert.NotNil(t, view.Extracted)
 }
 
 func TestProcessMarksFailedThenRetrySucceeds(t *testing.T) {
@@ -224,6 +234,7 @@ type testPipeline struct {
 	store    *scan.Store
 	objects  *storage.Fake
 	provider *vision.Fake
+	recorder vision.Recorder
 	enqueuer *fakeEnqueuer
 	service  *scan.Service
 	logs     *bytes.Buffer
@@ -268,6 +279,7 @@ func (p *testPipeline) rebuildWithLogger(t *testing.T, logger *slog.Logger) {
 		Store:         p.store,
 		Objects:       p.objects,
 		Provider:      p.provider,
+		Recorder:      p.recorder,
 		Enqueuer:      p.enqueuer,
 		Logger:        logger,
 		MaxImages:     4,
@@ -334,3 +346,81 @@ func countScans(t *testing.T, pool *pgxpool.Pool) int {
 	require.NoError(t, pool.QueryRow(context.Background(), `SELECT count(*) FROM scans`).Scan(&count))
 	return count
 }
+
+func TestProcessMergesImagesAndRecordsEveryCall(t *testing.T) {
+	pipeline := newPipeline(t)
+	ctx := context.Background()
+
+	first := vision.DefaultFakeLabel()
+	second := vision.DefaultFakeLabel()
+	first.NRN = vision.RawField{Value: ptrTest("01-2345"), Confidence: 0.80, Source: 0}
+	second.NRN = vision.RawField{Value: ptrTest("01-9999"), Confidence: 0.88, Source: 0}
+	pipeline.provider = &vision.Fake{Results: []vision.Result{
+		{Provider: "fake", Model: "fake-v1", PromptVersion: "fake", Confidence: 1, Label: &first},
+		{Provider: "fake", Model: "fake-v1", PromptVersion: "fake", Confidence: 1, Label: &second},
+	}}
+	recorder := &recordingRecorder{}
+	pipeline.recorder = recorder
+	pipeline.rebuild(t)
+
+	created, isNew, err := pipeline.service.Create(ctx, scan.CreateRequest{
+		ClientKey:   "default",
+		RequestHash: "merge-hash",
+		Images:      [][]byte{readImage(t, "normal.jpg"), readImage(t, "rotated.jpg")},
+	})
+	require.NoError(t, err)
+	require.True(t, isNew)
+
+	require.NoError(t, pipeline.service.Process(ctx, created.ID.String()))
+	got, err := pipeline.service.Get(ctx, created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, scan.StatusCompleted, got.Status, "the readable fields still complete the scan")
+
+	var extracted vision.LabelData
+	require.NoError(t, json.Unmarshal(got.Result.Extracted, &extracted))
+	assert.Nil(t, extracted.NRN.Value, "a close NRN conflict must not be guessed")
+	assert.Contains(t, extracted.Conflicts, "nrn")
+	assert.Contains(t, extracted.Unreadable, "nrn")
+	assert.Len(t, recorder.calls(), 2)
+	for _, call := range recorder.calls() {
+		assert.Equal(t, "success", call.Outcome)
+		assert.Equal(t, "fake", call.Provider)
+		assert.Equal(t, created.ID.String(), call.ScanID)
+	}
+}
+
+func TestProcessRecordsProviderFailure(t *testing.T) {
+	pipeline := newPipeline(t)
+	pipeline.provider.Errors = []error{errors.New("provider unavailable")}
+	recorder := &recordingRecorder{}
+	pipeline.recorder = recorder
+	pipeline.rebuild(t)
+
+	created := createScan(t, pipeline, "record-failure")
+	require.Error(t, pipeline.service.Process(context.Background(), created.ID.String()))
+
+	calls := recorder.calls()
+	require.Len(t, calls, 1)
+	assert.Equal(t, "error", calls[0].Outcome)
+	assert.Equal(t, "provider_error", calls[0].ErrorCode)
+}
+
+type recordingRecorder struct {
+	mu    sync.Mutex
+	items []vision.CallRecord
+}
+
+func (r *recordingRecorder) Record(_ context.Context, call vision.CallRecord) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.items = append(r.items, call)
+	return nil
+}
+
+func (r *recordingRecorder) calls() []vision.CallRecord {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]vision.CallRecord(nil), r.items...)
+}
+
+func ptrTest(value string) *string { return &value }

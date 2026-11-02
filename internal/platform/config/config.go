@@ -49,6 +49,7 @@ type Config struct {
 	Greenbook Greenbook
 	API       API
 	Scan      Scan
+	Vision    Vision
 }
 
 // HTTP holds the HTTP server settings.
@@ -111,6 +112,25 @@ type Greenbook struct {
 // single key with rows in api_clients.
 type API struct {
 	Key string
+}
+
+// Vision holds provider selection, resilience, and pricing for label
+// extraction. Model identifiers are pinned; floating aliases are not accepted.
+type Vision struct {
+	Provider                string
+	Model                   string
+	FallbackModel           string
+	APIKey                  string
+	BaseURL                 string
+	MaxTokens               int
+	Timeout                 time.Duration
+	Retries                 int
+	RetryBackoff            time.Duration
+	CircuitFailureThreshold int
+	CircuitCooldown         time.Duration
+	MaxImageDimension       int
+	InputPricePerMToken     float64
+	OutputPricePerMToken    float64
 }
 
 // Scan holds upload and extraction limits.
@@ -229,6 +249,22 @@ func LoadFrom(environ []string) (Config, error) {
 			PollInterval:    l.duration("SCAN_POLL_INTERVAL", 100*time.Millisecond),
 			MinConfidence:   l.fraction("SCAN_MIN_CONFIDENCE", 0.5),
 		},
+		Vision: Vision{
+			Provider:                l.oneOf("VISION_PROVIDER", "fake", "fake", "claude"),
+			Model:                   l.str("VISION_MODEL", ""),
+			FallbackModel:           l.str("VISION_FALLBACK_MODEL", ""),
+			APIKey:                  l.str("VISION_API_KEY", ""),
+			BaseURL:                 l.str("VISION_BASE_URL", "https://api.anthropic.com"),
+			MaxTokens:               l.positiveInt("VISION_MAX_TOKENS", 4096),
+			Timeout:                 l.duration("VISION_TIMEOUT", 45*time.Second),
+			Retries:                 l.nonNegativeInt("VISION_RETRIES", 2),
+			RetryBackoff:            l.duration("VISION_RETRY_BACKOFF", 500*time.Millisecond),
+			CircuitFailureThreshold: l.positiveInt("VISION_CIRCUIT_FAILURE_THRESHOLD", 5),
+			CircuitCooldown:         l.duration("VISION_CIRCUIT_COOLDOWN", 30*time.Second),
+			MaxImageDimension:       l.positiveInt("VISION_MAX_IMAGE_DIMENSION", 1568),
+			InputPricePerMToken:     l.nonNegativeFloat("VISION_INPUT_PRICE_PER_MTOKEN", 3),
+			OutputPricePerMToken:    l.nonNegativeFloat("VISION_OUTPUT_PRICE_PER_MTOKEN", 15),
+		},
 	}
 
 	l.validateURL("DATABASE_URL", cfg.Database.URL)
@@ -245,6 +281,18 @@ func LoadFrom(environ []string) (Config, error) {
 	if cfg.Scan.MaxRequestBytes < cfg.Scan.MaxImageBytes*int64(cfg.Scan.MaxImages) {
 		l.add("SCAN_MAX_REQUEST_BYTES", "must be at least SCAN_MAX_IMAGE_BYTES * SCAN_MAX_IMAGES")
 	}
+	if cfg.Vision.Provider == "claude" {
+		if cfg.Vision.Model == "" {
+			l.add("VISION_MODEL", "is required when VISION_PROVIDER=claude; pin an exact model id")
+		}
+		if cfg.Vision.APIKey == "" {
+			l.add("VISION_API_KEY", "is required when VISION_PROVIDER=claude")
+		}
+	}
+	if cfg.Env == EnvProduction && cfg.Vision.Provider == "fake" {
+		l.add("VISION_PROVIDER", "must not be fake in production")
+	}
+	l.validateHTTPURL("VISION_BASE_URL", cfg.Vision.BaseURL)
 
 	if len(l.problems) > 0 {
 		return Config{}, &Error{Problems: l.problems}
@@ -269,7 +317,7 @@ func (c Config) LogLevelValue() slog.Level {
 // Secrets returns the configured secret values so they can be registered with
 // the log redactor. The slice is never logged directly.
 func (c Config) Secrets() []string {
-	secrets := []string{c.Storage.SecretKey, c.Storage.AccessKey}
+	secrets := []string{c.Storage.SecretKey, c.Storage.AccessKey, c.Vision.APIKey}
 	if password := databasePassword(c.Database.URL); password != "" {
 		secrets = append(secrets, password)
 	}
@@ -370,6 +418,23 @@ func (l *loader) positiveFloat(key string, fallback float64) float64 {
 	}
 	if parsed <= 0 {
 		l.add(key, "must be greater than zero")
+		return fallback
+	}
+	return parsed
+}
+
+func (l *loader) nonNegativeFloat(key string, fallback float64) float64 {
+	value, ok := l.raw(key)
+	if !ok {
+		return fallback
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		l.add(key, "must be a number")
+		return fallback
+	}
+	if parsed < 0 {
+		l.add(key, "must not be negative")
 		return fallback
 	}
 	return parsed

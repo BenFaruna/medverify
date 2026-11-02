@@ -47,6 +47,14 @@ func TestLoadFromValidEnvironment(t *testing.T) {
 	assert.Equal(t, 100*time.Millisecond, cfg.Scan.PollInterval)
 	assert.Equal(t, 0.5, cfg.Scan.MinConfidence)
 
+	assert.Equal(t, "fake", cfg.Vision.Provider)
+	assert.Equal(t, 4096, cfg.Vision.MaxTokens)
+	assert.Equal(t, 45*time.Second, cfg.Vision.Timeout)
+	assert.Equal(t, 2, cfg.Vision.Retries)
+	assert.Equal(t, 1568, cfg.Vision.MaxImageDimension)
+	assert.Equal(t, 3.0, cfg.Vision.InputPricePerMToken)
+	assert.Equal(t, 15.0, cfg.Vision.OutputPricePerMToken)
+
 	assert.True(t, cfg.Greenbook.Enabled)
 	assert.Equal(t, "https://greenbook.nafdac.gov.ng", cfg.Greenbook.BaseURL)
 	assert.Equal(t, 1.0, cfg.Greenbook.RequestsPerSecond)
@@ -87,6 +95,9 @@ func TestLoadFromOverridesDefaults(t *testing.T) {
 		"GREENBOOK_ALLOWED_HOSTS=example.test",
 		"GREENBOOK_SYNC_INTERVAL=6h",
 		"GREENBOOK_ANOMALY_MAX_DROP_PERCENT=50",
+		"VISION_PROVIDER=claude",
+		"VISION_MODEL=claude-sonnet-4-5-20250929",
+		"VISION_API_KEY=test-vision-key",
 	)
 
 	cfg, err := config.LoadFrom(env)
@@ -102,6 +113,9 @@ func TestLoadFromOverridesDefaults(t *testing.T) {
 	assert.True(t, cfg.Storage.UseSSL)
 	assert.Equal(t, 8, cfg.Jobs.Concurrency)
 	assert.Equal(t, "production-key", cfg.API.Key)
+	assert.Equal(t, "claude", cfg.Vision.Provider)
+	assert.Equal(t, "claude-sonnet-4-5-20250929", cfg.Vision.Model)
+	assert.Contains(t, cfg.Secrets(), "test-vision-key")
 
 	assert.False(t, cfg.Greenbook.Enabled)
 	assert.Equal(t, "http://localhost:9001", cfg.Greenbook.BaseURL)

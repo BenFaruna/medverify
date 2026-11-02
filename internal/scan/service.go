@@ -3,6 +3,7 @@ package scan
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -28,31 +29,35 @@ type Enqueuer interface {
 
 // ServiceOptions configures the scan pipeline.
 type ServiceOptions struct {
-	Store         *Store
-	Objects       storage.Store
-	Provider      vision.Provider
-	Enqueuer      Enqueuer
-	Logger        *slog.Logger
-	MaxImages     int
-	Limits        ImageLimits
-	MinConfidence float64
-	PollInterval  time.Duration
-	Random        func() string
+	Store             *Store
+	Objects           storage.Store
+	Provider          vision.Provider
+	Recorder          vision.Recorder
+	Enqueuer          Enqueuer
+	Logger            *slog.Logger
+	MaxImages         int
+	Limits            ImageLimits
+	MaxImageDimension int
+	MinConfidence     float64
+	PollInterval      time.Duration
+	Random            func() string
 }
 
 // Service orchestrates upload validation, storage, persistence, and the
 // background extraction job. It never calls a real vision provider in phase 3.
 type Service struct {
-	store         *Store
-	objects       storage.Store
-	provider      vision.Provider
-	enqueuer      Enqueuer
-	logger        *slog.Logger
-	maxImages     int
-	limits        ImageLimits
-	minConfidence float64
-	pollInterval  time.Duration
-	random        func() string
+	store             *Store
+	objects           storage.Store
+	provider          vision.Provider
+	recorder          vision.Recorder
+	enqueuer          Enqueuer
+	logger            *slog.Logger
+	maxImages         int
+	limits            ImageLimits
+	maxImageDimension int
+	minConfidence     float64
+	pollInterval      time.Duration
+	random            func() string
 }
 
 // NewService builds a service, applying safe defaults for omitted options.
@@ -69,6 +74,9 @@ func NewService(opts ServiceOptions) (*Service, error) {
 	if opts.MaxImages <= 0 {
 		opts.MaxImages = 4
 	}
+	if opts.MaxImageDimension <= 0 {
+		opts.MaxImageDimension = 1568
+	}
 	if opts.PollInterval <= 0 {
 		opts.PollInterval = 100 * time.Millisecond
 	}
@@ -80,16 +88,18 @@ func NewService(opts ServiceOptions) (*Service, error) {
 		logger = slog.New(slog.DiscardHandler)
 	}
 	return &Service{
-		store:         opts.Store,
-		objects:       opts.Objects,
-		provider:      opts.Provider,
-		enqueuer:      opts.Enqueuer,
-		logger:        logger,
-		maxImages:     opts.MaxImages,
-		limits:        opts.Limits,
-		minConfidence: opts.MinConfidence,
-		pollInterval:  opts.PollInterval,
-		random:        opts.Random,
+		store:             opts.Store,
+		objects:           opts.Objects,
+		provider:          opts.Provider,
+		recorder:          opts.Recorder,
+		enqueuer:          opts.Enqueuer,
+		logger:            logger,
+		maxImages:         opts.MaxImages,
+		limits:            opts.Limits,
+		maxImageDimension: opts.MaxImageDimension,
+		minConfidence:     opts.MinConfidence,
+		pollInterval:      opts.PollInterval,
+		random:            opts.Random,
 	}, nil
 }
 
@@ -272,49 +282,116 @@ func (s *Service) Process(ctx context.Context, rawID string) error {
 		return nil
 	}
 
-	images := make([]vision.Image, 0, len(scan.Images))
+	labels := make([]vision.RawLabel, 0, len(scan.Images))
+	providerName, model, promptVersion := "", "", ""
+	unreadableImages := 0
 	for _, image := range scan.Images {
 		data, err := s.objects.Get(ctx, image.StorageKey)
 		if err != nil {
 			s.finishFailed(ctx, id, fmt.Errorf("load stored image: %w", err))
 			return fmt.Errorf("load stored image for scan %s: %w", id, err)
 		}
-		images = append(images, vision.Image{Position: image.Position, Data: data})
+
+		prepared, err := vision.Preprocess(data, s.maxImageDimension)
+		if err != nil {
+			s.finishFailed(ctx, id, fmt.Errorf("preprocess image: %w", err))
+			return fmt.Errorf("preprocess image for scan %s: %w", id, err)
+		}
+
+		started := time.Now()
+		result, err := s.provider.Extract(ctx, vision.Request{
+			ScanID:   id.String(),
+			Language: scan.Language,
+			Images:   []vision.Image{{Position: image.Position, Data: prepared}},
+		})
+		switch {
+		case errors.Is(err, vision.ErrUnreadable):
+			unreadableImages++
+			s.recordCall(ctx, id, result, started, "unreadable", "unreadable")
+			continue
+		case err != nil:
+			s.recordCall(ctx, id, result, started, "error", "provider_error")
+			s.finishFailed(ctx, id, err)
+			return fmt.Errorf("extract scan %s: %w", id, err)
+		case result.Label == nil:
+			unreadableImages++
+			s.recordCall(ctx, id, result, started, "unreadable", "empty_label")
+			continue
+		}
+
+		s.recordCall(ctx, id, result, started, "success", "")
+		if providerName == "" {
+			providerName, model, promptVersion = result.Provider, result.Model, result.PromptVersion
+		}
+		labels = append(labels, result.Label.WithSource(image.Position))
 	}
 
-	result, err := s.provider.Extract(ctx, vision.Request{
-		ScanID:   id.String(),
-		Language: scan.Language,
-		Images:   images,
-	})
-	if errors.Is(err, vision.ErrUnreadable) {
+	if len(labels) == 0 {
+		// Every image was unreadable. That is a photo problem, not a verdict.
 		s.finish(ctx, id, StatusUnreadable, Result{Reasons: []byte("[]")})
 		return nil
 	}
+
+	merged := vision.MergeLabels(labels...)
+	label := vision.ValidateLabel(merged)
+	label.Provider = providerName
+	label.Model = model
+	label.PromptVersion = promptVersion
+	extracted, err := json.Marshal(label)
 	if err != nil {
-		s.finishFailed(ctx, id, err)
-		return fmt.Errorf("extract scan %s: %w", id, err)
+		s.finishFailed(ctx, id, fmt.Errorf("encode label: %w", err))
+		return fmt.Errorf("encode label for scan %s: %w", id, err)
 	}
-	if s.minConfidence > 0 && result.Confidence < s.minConfidence {
-		// Low confidence is unreadable, never a guess.
+
+	if !label.Identified() || (s.minConfidence > 0 && label.OverallConfidence() < s.minConfidence) {
+		// Low confidence or no key field is unreadable, never a guess.
 		s.finish(ctx, id, StatusUnreadable, Result{
-			Provider: result.Provider,
-			Reasons:  []byte("[]"),
+			Extracted: extracted,
+			Provider:  providerName,
+			Reasons:   []byte("[]"),
 		})
 		return nil
 	}
 
-	// Extracted stays null until phase 04 and the verdict until phase 07. The
-	// placeholder result carries only the provider name and empty reasons.
 	s.finish(ctx, id, StatusCompleted, Result{
-		Provider: result.Provider,
-		Reasons:  []byte("[]"),
+		Extracted: extracted,
+		Provider:  providerName,
+		Reasons:   []byte("[]"),
 	})
 	s.logger.InfoContext(ctx, "scan processed",
 		slog.String("scan_id", id.String()),
 		slog.String("status", string(StatusCompleted)),
+		slog.String("provider", providerName),
+		slog.Int("images", len(scan.Images)),
+		slog.Int("unreadable_images", unreadableImages),
 	)
 	return nil
+}
+
+func (s *Service) recordCall(ctx context.Context, id uuid.UUID, result vision.Result, started time.Time, outcome, errorCode string) {
+	if s.recorder == nil {
+		return
+	}
+	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := s.recorder.Record(recordCtx, vision.CallRecord{
+		ScanID:        id.String(),
+		Provider:      result.Provider,
+		Model:         result.Model,
+		PromptVersion: result.PromptVersion,
+		Kind:          "vision",
+		Latency:       time.Since(started),
+		Usage:         result.Usage,
+		Outcome:       outcome,
+		ErrorCode:     errorCode,
+	}); err != nil {
+		// Cost visibility must not turn a readable scan into a failure.
+		s.logger.WarnContext(ctx, "could not record provider call",
+			slog.String("scan_id", id.String()),
+			slog.String("outcome", outcome),
+			slog.Any("err", err),
+		)
+	}
 }
 
 func (s *Service) finish(ctx context.Context, id uuid.UUID, status Status, result Result) {

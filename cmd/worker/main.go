@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/benfaruna/medverify/internal/llm"
 	"github.com/benfaruna/medverify/internal/platform/config"
 	"github.com/benfaruna/medverify/internal/platform/db"
 	"github.com/benfaruna/medverify/internal/platform/jobs"
@@ -20,7 +21,7 @@ import (
 	"github.com/benfaruna/medverify/internal/registry"
 	"github.com/benfaruna/medverify/internal/scan"
 	"github.com/benfaruna/medverify/internal/storage"
-	"github.com/benfaruna/medverify/internal/vision"
+	"github.com/benfaruna/medverify/internal/vision/visioncfg"
 )
 
 func main() {
@@ -75,20 +76,25 @@ func run() error {
 		return err
 	}
 
-	// Phase 3 uses the fake provider. Phase 4 swaps in a real implementation
-	// behind the same vision.Provider interface.
+	provider, err := visioncfg.New(cfg.Vision)
+	if err != nil {
+		return err
+	}
+
 	scanService, err := scan.NewService(scan.ServiceOptions{
 		Store:     scan.NewStore(pool),
 		Objects:   objects,
-		Provider:  vision.NewFake(),
+		Provider:  provider,
+		Recorder:  llm.NewRecorder(pool),
 		Logger:    logger,
 		MaxImages: cfg.Scan.MaxImages,
 		Limits: scan.ImageLimits{
 			MaxBytes:  cfg.Scan.MaxImageBytes,
 			MaxPixels: cfg.Scan.MaxPixels,
 		},
-		MinConfidence: cfg.Scan.MinConfidence,
-		PollInterval:  cfg.Scan.PollInterval,
+		MaxImageDimension: cfg.Vision.MaxImageDimension,
+		MinConfidence:     cfg.Scan.MinConfidence,
+		PollInterval:      cfg.Scan.PollInterval,
 	})
 	if err != nil {
 		return err
@@ -107,6 +113,8 @@ func run() error {
 		slog.Int("concurrency", cfg.Jobs.Concurrency),
 		slog.Bool("greenbook_enabled", cfg.Greenbook.Enabled),
 		slog.Duration("greenbook_interval", cfg.Greenbook.SyncInterval),
+		slog.String("vision_provider", cfg.Vision.Provider),
+		slog.String("vision_model", cfg.Vision.Model),
 	)
 
 	<-ctx.Done()
