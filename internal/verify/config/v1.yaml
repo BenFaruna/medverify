@@ -1,0 +1,27 @@
+version: v1
+
+# Name similarity gates use trigram similarity over normalized product names
+# (lowercase, punctuation removed, dosage form and pack words stripped).
+#
+# A name-only candidate needs stronger evidence than a name+manufacturer one,
+# because a brand name alone can collide across products.
+name_threshold: 0.55
+name_only_threshold: 0.85
+manufacturer_threshold: 0.45
+
+# Relative tolerance when comparing strengths after unit conversion. 0.05 means
+# 500 mg and 0.5 g agree, while 500 mg and 250 mg disagree.
+strength_tolerance: 0.05
+
+# Two fuzzy candidates whose combined scores are within this margin are treated
+# as ambiguous rather than picking the higher one.
+ambiguity_margin: 0.08
+
+# How many trigram candidates to fetch and inspect.
+max_name_candidates: 20
+
+# How many candidates to return to the caller for candidate_only/ambiguous.
+max_candidates: 5
+
+# Upper bound on confusable-NRN variant lookups per scan.
+max_variant_lookups: 32
