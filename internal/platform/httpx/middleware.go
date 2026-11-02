@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"regexp"
 	"runtime/debug"
+	"strings"
 	"time"
 )
 
@@ -125,8 +126,21 @@ func Timeout(d time.Duration) func(http.Handler) http.Handler {
 // MaxBodyBytes caps the size of every request body. Handlers that read the body
 // receive an error once the cap is exceeded; ErrPayloadTooLarge explains it.
 func MaxBodyBytes(limit int64) func(http.Handler) http.Handler {
+	return MaxBodyBytesExcept(limit)
+}
+
+// MaxBodyBytesExcept applies the cap to every path except those starting with
+// one of the prefixes. Upload routes use it to enforce their own, larger limit
+// without opening the cap for the rest of the API.
+func MaxBodyBytesExcept(limit int64, prefixes ...string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			for _, prefix := range prefixes {
+				if prefix != "" && strings.HasPrefix(r.URL.Path, prefix) {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
 			if r.Body != nil {
 				r.Body = http.MaxBytesReader(w, r.Body, limit)
 			}

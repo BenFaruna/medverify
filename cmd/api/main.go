@@ -17,8 +17,11 @@ import (
 	"github.com/benfaruna/medverify/internal/platform/config"
 	"github.com/benfaruna/medverify/internal/platform/db"
 	"github.com/benfaruna/medverify/internal/platform/httpx"
+	"github.com/benfaruna/medverify/internal/platform/jobs"
 	"github.com/benfaruna/medverify/internal/platform/logging"
+	"github.com/benfaruna/medverify/internal/scan"
 	"github.com/benfaruna/medverify/internal/storage"
+	"github.com/benfaruna/medverify/internal/vision"
 )
 
 func main() {
@@ -64,6 +67,32 @@ func run() error {
 		return err
 	}
 
+	// The API only enqueues work. An insert-only client (no workers, not
+	// started) leaves execution to the worker process and can insert job kinds
+	// registered there.
+	jobClient, err := jobs.NewClient(pool, logger, nil, cfg.Jobs)
+	if err != nil {
+		return err
+	}
+
+	scanService, err := scan.NewService(scan.ServiceOptions{
+		Store:     scan.NewStore(pool),
+		Objects:   store,
+		Provider:  vision.NewFake(),
+		Enqueuer:  jobs.NewScanEnqueuer(jobClient),
+		Logger:    logger,
+		MaxImages: cfg.Scan.MaxImages,
+		Limits: scan.ImageLimits{
+			MaxBytes:  cfg.Scan.MaxImageBytes,
+			MaxPixels: cfg.Scan.MaxPixels,
+		},
+		MinConfidence: cfg.Scan.MinConfidence,
+		PollInterval:  cfg.Scan.PollInterval,
+	})
+	if err != nil {
+		return err
+	}
+
 	handler := NewHandler(Options{
 		Logger: logger,
 		Dependencies: []Dependency{
@@ -73,6 +102,15 @@ func run() error {
 		ReadyTimeout:   cfg.HTTP.RequestTimeout,
 		RequestTimeout: cfg.HTTP.RequestTimeout,
 		MaxBodyBytes:   cfg.HTTP.MaxBodyBytes,
+		APIKey:         cfg.API.Key,
+		Scan: scan.NewHTTPHandler(scan.HTTPOptions{
+			Service:         scanService,
+			Logger:          logger,
+			MaxImages:       cfg.Scan.MaxImages,
+			MaxImageBytes:   cfg.Scan.MaxImageBytes,
+			MaxRequestBytes: cfg.Scan.MaxRequestBytes,
+			SyncWait:        cfg.Scan.SyncWait,
+		}),
 	})
 
 	server := httpx.NewServer(httpx.ServerOptions{

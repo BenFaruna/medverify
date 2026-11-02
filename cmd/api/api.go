@@ -10,7 +10,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/benfaruna/medverify/internal/platform/auth"
 	"github.com/benfaruna/medverify/internal/platform/httpx"
+	"github.com/benfaruna/medverify/internal/scan"
 )
 
 // Dependency is one thing /readyz probes. A dependency is ready when Check
@@ -27,6 +29,8 @@ type Options struct {
 	ReadyTimeout   time.Duration
 	RequestTimeout time.Duration
 	MaxBodyBytes   int64
+	APIKey         string
+	Scan           *scan.HTTPHandler
 }
 
 // NewHandler builds the router: middleware, health endpoints, and the problem
@@ -51,13 +55,21 @@ func NewHandler(opts Options) http.Handler {
 	router.Use(httpx.Recover(logger))
 	router.Use(httpx.AccessLog(logger))
 	router.Use(httpx.Timeout(opts.RequestTimeout))
-	router.Use(httpx.MaxBodyBytes(opts.MaxBodyBytes))
+	router.Use(httpx.MaxBodyBytesExcept(opts.MaxBodyBytes, "/v1/scans"))
 
 	router.NotFound(httpx.NotFoundHandler().ServeHTTP)
 	router.MethodNotAllowed(httpx.MethodNotAllowedHandler().ServeHTTP)
 
 	router.Get("/healthz", healthz)
 	router.Get("/readyz", readyz(logger, opts.Dependencies, opts.ReadyTimeout))
+
+	if opts.Scan != nil {
+		router.Route("/v1", func(r chi.Router) {
+			r.Use(auth.APIKey(opts.APIKey))
+			r.Post("/scans", opts.Scan.Create)
+			r.Get("/scans/{id}", opts.Scan.Get)
+		})
+	}
 
 	return router
 }

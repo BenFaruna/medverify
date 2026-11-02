@@ -17,6 +17,8 @@ servers:
 tags:
   - name: operations
     description: Liveness and readiness probes
+  - name: scans
+    description: Upload pack photos asynchronously and read the result
 
 paths:
   /healthz:
@@ -69,7 +71,173 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+  /v1/scans:
+    post:
+      operationId: createScan
+      summary: Upload one to four pack photos
+      description: |
+        Accepts a multipart upload, validates and re-encodes each image, stores
+        it privately, and starts an asynchronous extraction job. When the job
+        finishes within the sync wait, the response is 201. Otherwise it is 202
+        with a Location header; poll GET /v1/scans/{id} until the status is
+        terminal.
+
+        Coordinates are reduced to a coarse grid cell; raw latitude and
+        longitude are never stored or logged. The client filename is never used
+        as a storage key.
+
+        Send the same Idempotency-Key and identical body to retry safely. The
+        same key with a different body returns 422.
+      tags: [scans]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Client-generated key, up to 255 characters.
+          schema:
+            type: string
+            maxLength: 255
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [images]
+              properties:
+                images:
+                  type: array
+                  minItems: 1
+                  maxItems: 4
+                  items:
+                    type: string
+                    format: binary
+                latitude:
+                  type: number
+                  minimum: -90
+                  maximum: 90
+                  description: Optional, sent with longitude. Reduced to a coarse cell.
+                longitude:
+                  type: number
+                  minimum: -180
+                  maximum: 180
+                  description: Optional, sent with latitude. Reduced to a coarse cell.
+                language:
+                  type: string
+                  maxLength: 32
+                  example: en
+                  description: Optional short language tag for the extraction.
+      responses:
+        "201":
+          description: The scan reached a terminal state within the sync wait.
+          headers:
+            Location:
+              description: Canonical URL of the scan.
+              schema:
+                type: string
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Scan"
+        "202":
+          description: The scan is still queued or processing; poll the Location.
+          headers:
+            Location:
+              description: URL to poll with GET.
+              schema:
+                type: string
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Scan"
+        "400":
+          description: Missing or invalid fields, too many images, or a corrupt image.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "413":
+          description: A file or the whole request is too large.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: A file is not JPEG, PNG, or WebP according to its bytes.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The Idempotency-Key was already used with a different body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/scans/{id}:
+    get:
+      operationId: getScan
+      summary: Read a scan's status and result
+      tags: [scans]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Scan UUID returned by the upload.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Current scan state. Result fields are null until later phases fill them.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Scan"
+        "400":
+          description: The ID is not a UUID.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: No scan exists with this ID.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        Phase 3 placeholder shared key. Phase 11 replaces it with per-client
+        credentials stored in api_clients.
   headers:
     X-Request-Id:
       description: Correlation ID for this request. Echoed from the client when well formed.
@@ -98,6 +266,50 @@ components:
           example:
             database: ok
             storage: ok
+    Scan:
+      type: object
+      required: [id, status, verdict, reasons, extracted, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued, processing, completed, unreadable, failed]
+          description: |
+            `unreadable` means the images could not be read confidently; ask
+            for a better photo. It never means the medicine is fake.
+        verdict:
+          type: object
+          nullable: true
+          description: Null until phase 07. Never a safety or authenticity claim.
+          additionalProperties: true
+        reasons:
+          type: array
+          description: Empty until phase 07.
+          items:
+            type: object
+            additionalProperties: true
+        extracted:
+          type: object
+          nullable: true
+          description: Null until phase 04.
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+      example:
+        id: 0f9d8c2e-6a1f-4c69-9f4d-0f1f6b2c9a11
+        status: completed
+        verdict: null
+        reasons: []
+        extracted: null
+        created_at: "2026-11-02T09:00:00Z"
+        completed_at: "2026-11-02T09:00:01Z"
     Problem:
       type: object
       description: RFC 7807 problem details with a stable machine code.
@@ -130,12 +342,20 @@ components:
           description: Stable machine code clients branch on.
           enum:
             - bad_request
+            - conflict
+            - corrupt_image
+            - image_too_large
             - internal_error
+            - invalid_language
+            - invalid_location
             - method_not_allowed
             - not_found
             - payload_too_large
             - timeout
+            - too_many_images
+            - unauthorized
             - unavailable
+            - unsupported_format
       example:
         type: https://medverify.ng/problems/unavailable
         title: Service Unavailable

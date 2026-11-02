@@ -13,6 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/benfaruna/medverify/internal/platform/httpx"
+	"github.com/benfaruna/medverify/internal/scan"
+	"github.com/google/uuid"
 )
 
 func TestHealthzReturnsOKWithoutDependencies(t *testing.T) {
@@ -131,6 +133,41 @@ func TestUnknownRouteReturnsProblem(t *testing.T) {
 
 	assert.Equal(t, http.StatusNotFound, recorder.Code)
 	assert.Equal(t, httpx.ContentTypeProblemJSON, recorder.Header().Get("Content-Type"))
+}
+
+func TestScanRoutesRequireAPIKey(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(Options{
+		APIKey: "test-key",
+		Scan:   scan.NewHTTPHandler(scan.HTTPOptions{MaxImages: 4, MaxImageBytes: 1 << 20, MaxRequestBytes: 1 << 20}),
+	})
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/scans", nil))
+
+	assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+	assert.Equal(t, httpx.ContentTypeProblemJSON, recorder.Header().Get("Content-Type"))
+
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/scans/"+uuid.NewString(), nil))
+	assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+}
+
+func TestScanGetRejectsMalformedID(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(Options{
+		APIKey: "test-key",
+		Scan:   scan.NewHTTPHandler(scan.HTTPOptions{}),
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/scans/not-a-uuid", nil)
+	request.Header.Set("X-API-Key", "test-key")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
 }
 
 func TestReadinessResponseIsNotCached(t *testing.T) {

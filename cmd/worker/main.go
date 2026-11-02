@@ -18,6 +18,9 @@ import (
 	"github.com/benfaruna/medverify/internal/platform/jobs"
 	"github.com/benfaruna/medverify/internal/platform/logging"
 	"github.com/benfaruna/medverify/internal/registry"
+	"github.com/benfaruna/medverify/internal/scan"
+	"github.com/benfaruna/medverify/internal/storage"
+	"github.com/benfaruna/medverify/internal/vision"
 )
 
 func main() {
@@ -59,6 +62,38 @@ func run() error {
 		workerOpts = append(workerOpts, jobs.WithGreenbookRunner(syncer))
 		clientOpts = append(clientOpts, jobs.WithPeriodicJobs(jobs.GreenbookPeriodicJob(cfg.Greenbook)))
 	}
+
+	objects, err := storage.NewS3(storage.Options{
+		Endpoint:  cfg.Storage.Endpoint,
+		AccessKey: cfg.Storage.AccessKey,
+		SecretKey: cfg.Storage.SecretKey,
+		Bucket:    cfg.Storage.Bucket,
+		Region:    cfg.Storage.Region,
+		UseSSL:    cfg.Storage.UseSSL,
+	})
+	if err != nil {
+		return err
+	}
+
+	// Phase 3 uses the fake provider. Phase 4 swaps in a real implementation
+	// behind the same vision.Provider interface.
+	scanService, err := scan.NewService(scan.ServiceOptions{
+		Store:     scan.NewStore(pool),
+		Objects:   objects,
+		Provider:  vision.NewFake(),
+		Logger:    logger,
+		MaxImages: cfg.Scan.MaxImages,
+		Limits: scan.ImageLimits{
+			MaxBytes:  cfg.Scan.MaxImageBytes,
+			MaxPixels: cfg.Scan.MaxPixels,
+		},
+		MinConfidence: cfg.Scan.MinConfidence,
+		PollInterval:  cfg.Scan.PollInterval,
+	})
+	if err != nil {
+		return err
+	}
+	workerOpts = append(workerOpts, jobs.WithScanRunner(scanService))
 
 	client, err := jobs.NewClient(pool, logger, jobs.NewWorkers(logger, workerOpts...), cfg.Jobs, clientOpts...)
 	if err != nil {

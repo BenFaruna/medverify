@@ -20,13 +20,21 @@ const ProblemTypeBase = "https://medverify.ng/problems/"
 
 // Stable machine codes. Clients branch on these, never on the detail text.
 const (
-	CodeBadRequest       = "bad_request"
-	CodeInternalError    = "internal_error"
-	CodeMethodNotAllowed = "method_not_allowed"
-	CodeNotFound         = "not_found"
-	CodePayloadTooLarge  = "payload_too_large"
-	CodeTimeout          = "timeout"
-	CodeUnavailable      = "unavailable"
+	CodeBadRequest        = "bad_request"
+	CodeConflict          = "conflict"
+	CodeCorruptImage      = "corrupt_image"
+	CodeImageTooLarge     = "image_too_large"
+	CodeInternalError     = "internal_error"
+	CodeInvalidLanguage   = "invalid_language"
+	CodeInvalidLocation   = "invalid_location"
+	CodeMethodNotAllowed  = "method_not_allowed"
+	CodeNotFound          = "not_found"
+	CodePayloadTooLarge   = "payload_too_large"
+	CodeTimeout           = "timeout"
+	CodeTooManyImages     = "too_many_images"
+	CodeUnauthorized      = "unauthorized"
+	CodeUnavailable       = "unavailable"
+	CodeUnsupportedFormat = "unsupported_format"
 )
 
 // Problem is an RFC 7807 problem detail document plus a stable machine code.
