@@ -58,6 +58,13 @@ func normalizeStrength(strength registry.Strength) strengthAmount {
 // strengthsAgree compares two parsed strengths after unit conversion. It
 // returns ok=false when either cannot be compared; callers must treat that as
 // unknown, never as a mismatch.
+// StrengthsAgree reports whether two strengths are comparable and within a
+// relative tolerance. It is exported so the safety checker asks exactly the
+// same question as phase 05 instead of growing a second comparison.
+func StrengthsAgree(label, record registry.Strength, tolerance float64) (agree bool, comparable bool) {
+	return strengthsAgree(label, record, tolerance)
+}
+
 func strengthsAgree(label, record registry.Strength, tolerance float64) (agree bool, comparable bool) {
 	left := normalizeStrength(label)
 	right := normalizeStrength(record)

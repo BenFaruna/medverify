@@ -1,0 +1,34 @@
+version: safety-v1
+
+# Relative tolerance for comparing a printed strength with the registered
+# strength, after unit conversion. 0.05 means 500 mg and 0.5 g agree while
+# 500 mg and 250 mg disagree.
+#
+# OPEN: the phase 06 checklist requires a pharmacist to sign off this value.
+# It matches the phase 05 tolerance so both checks agree, but that is not a
+# clinical decision by itself. Change it here, not in code.
+strength_tolerance: 0.05
+
+# Printed ingredients below this extraction confidence are not used to raise a
+# flag. A poor photo must produce "unknown", not an accusation.
+min_ingredient_confidence: 0.70
+
+# A name-based watchlist entry must be this similar to the label before it is
+# reported. NRN matches are exact and do not use this.
+watchlist_name_threshold: 0.85
+
+# When a watchlist entry names a manufacturer, the label's manufacturer must
+# also agree to at least this similarity. An empty label manufacturer therefore
+# never matches a name-only entry, which is deliberate: a bare brand name is not
+# enough to attribute a pack to a company.
+watchlist_manufacturer_threshold: 0.70
+
+# Severity per flag type. It feeds the verdict engine and never appears as a
+# health claim.
+severity:
+  watchlist_product: high
+  watchlist_ingredient: high
+  undeclared_ingredient: medium
+  missing_ingredient: medium
+  strength_deviation: medium
+  registration_problem: high
