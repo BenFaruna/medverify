@@ -41,6 +41,19 @@ sql:
             go_type:
               type: "int32"
               pointer: true
+          # Watchlist issue dates and validity windows are calendar dates, not
+          # instants. Map them to time.Time at UTC midnight like timestamptz.
+          - db_type: "date"
+            nullable: false
+            go_type:
+              import: "time"
+              type: "Time"
+          - db_type: "date"
+            nullable: true
+            go_type:
+              import: "time"
+              type: "Time"
+              pointer: true
           - db_type: "uuid"
             go_type:
               import: "github.com/google/uuid"

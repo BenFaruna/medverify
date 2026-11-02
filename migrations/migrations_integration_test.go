@@ -40,7 +40,7 @@ func TestMigrationsStatusReportsApplied(t *testing.T) {
 
 	statuses, err := migrations.Status(ctx, databaseURL)
 	require.NoError(t, err)
-	require.Len(t, statuses, 5)
+	require.Len(t, statuses, 6)
 	for i, status := range statuses {
 		assert.Equal(t, "applied", string(status.State))
 		assert.Equal(t, int64(i+1), status.Source.Version)
@@ -72,6 +72,7 @@ func TestRegistryTablesExistAfterMigrateUp(t *testing.T) {
 
 	for _, table := range []string{
 		"products", "product_ingredients", "sync_runs", "smpc_documents", "smpc_sections",
+		"watchlist_sources", "watchlist_entries", "safety_flags",
 	} {
 		assert.True(t, tableExists(t, databaseURL, table), "table %s should exist", table)
 	}

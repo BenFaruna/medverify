@@ -79,6 +79,18 @@ type ProductIngredient struct {
 	StrengthRaw   *string  `json:"strength_raw"`
 }
 
+type SafetyFlag struct {
+	ID               int64       `json:"id"`
+	ScanID           uuid.UUID   `json:"scan_id"`
+	FlagType         string      `json:"flag_type"`
+	Severity         string      `json:"severity"`
+	ReasonCode       string      `json:"reason_code"`
+	Evidence         []byte      `json:"evidence"`
+	Source           []byte      `json:"source"`
+	WatchlistEntryID pgtype.Int8 `json:"watchlist_entry_id"`
+	CreatedAt        time.Time   `json:"created_at"`
+}
+
 type Scan struct {
 	ID           uuid.UUID  `json:"id"`
 	ClientKey    string     `json:"client_key"`
@@ -146,4 +158,31 @@ type SyncRun struct {
 	RowsChanged int32      `json:"rows_changed"`
 	RowsFailed  int32      `json:"rows_failed"`
 	Error       *string    `json:"error"`
+}
+
+type WatchlistEntry struct {
+	ID               int64      `json:"id"`
+	SourceID         int64      `json:"source_id"`
+	Kind             string     `json:"kind"`
+	Nrn              *string    `json:"nrn"`
+	ProductName      *string    `json:"product_name"`
+	ProductNameNorm  *string    `json:"product_name_norm"`
+	Manufacturer     *string    `json:"manufacturer"`
+	ManufacturerNorm *string    `json:"manufacturer_norm"`
+	IngredientNorm   *string    `json:"ingredient_norm"`
+	Reason           string     `json:"reason"`
+	EffectiveUntil   *time.Time `json:"effective_until"`
+	Active           bool       `json:"active"`
+	ReviewedBy       string     `json:"reviewed_by"`
+	ReviewDueAt      *time.Time `json:"review_due_at"`
+	CreatedAt        time.Time  `json:"created_at"`
+}
+
+type WatchlistSource struct {
+	ID          int64     `json:"id"`
+	IssuingBody string    `json:"issuing_body"`
+	Title       string    `json:"title"`
+	SourceUrl   string    `json:"source_url"`
+	IssuedAt    time.Time `json:"issued_at"`
+	CreatedAt   time.Time `json:"created_at"`
 }

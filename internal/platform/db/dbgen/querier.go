@@ -23,8 +23,13 @@ type Querier interface {
 	// Queries for the scan pipeline (phase 03). Hand-written SQL only; sqlc
 	// compiles it.
 	CreateScan(ctx context.Context, arg CreateScanParams) (Scan, error)
+	DeactivateWatchlistEntry(ctx context.Context, id int64) (int64, error)
 	DeleteProductIngredients(ctx context.Context, productID int64) error
 	DeleteSMPCSections(ctx context.Context, documentID int64) error
+	// Safety flags raised by registry verification (phase 06). Flags are replaced
+	// atomically with each terminal scan result, so a retry never leaves stale
+	// rows behind.
+	DeleteSafetyFlagsForScan(ctx context.Context, scanID uuid.UUID) error
 	// A terminal write only applies to a row this worker claimed.
 	FinishScan(ctx context.Context, arg FinishScanParams) (int64, error)
 	FinishSyncRun(ctx context.Context, arg FinishSyncRunParams) error
@@ -42,10 +47,14 @@ type Querier interface {
 	InsertLLMCall(ctx context.Context, arg InsertLLMCallParams) (LlmCall, error)
 	InsertProductIngredient(ctx context.Context, arg InsertProductIngredientParams) error
 	InsertSMPCSection(ctx context.Context, arg InsertSMPCSectionParams) error
+	InsertSafetyFlag(ctx context.Context, arg InsertSafetyFlagParams) error
 	InsertScanImage(ctx context.Context, arg InsertScanImageParams) (ScanImage, error)
+	InsertWatchlistEntry(ctx context.Context, arg InsertWatchlistEntryParams) (int64, error)
 	LastSuccessfulSyncRun(ctx context.Context) (SyncRun, error)
 	LatestSyncRun(ctx context.Context) (SyncRun, error)
 	ListIngredientNameCounts(ctx context.Context, rowLimit int32) ([]ListIngredientNameCountsRow, error)
+	ListLiveWatchlistEntriesByIngredients(ctx context.Context, arg ListLiveWatchlistEntriesByIngredientsParams) ([]ListLiveWatchlistEntriesByIngredientsRow, error)
+	ListLiveWatchlistEntriesByNRN(ctx context.Context, arg ListLiveWatchlistEntriesByNRNParams) ([]ListLiveWatchlistEntriesByNRNRow, error)
 	ListProductIngredients(ctx context.Context, productID int64) ([]ProductIngredient, error)
 	ListProductsByIngredient(ctx context.Context, arg ListProductsByIngredientParams) ([]Product, error)
 	// Products whose leaflet is missing, failed, or older than the product record.
@@ -54,13 +63,17 @@ type Querier interface {
 	ListProductsForLeafletSync(ctx context.Context, rowLimit int32) ([]ListProductsForLeafletSyncRow, error)
 	ListRecentSyncRuns(ctx context.Context, rowLimit int32) ([]SyncRun, error)
 	ListSMPCSections(ctx context.Context, documentID int64) ([]SmpcSection, error)
+	ListSafetyFlagsForScan(ctx context.Context, scanID uuid.UUID) ([]SafetyFlag, error)
 	ListScanImages(ctx context.Context, scanID uuid.UUID) ([]ScanImage, error)
+	ListStaleWatchlistEntries(ctx context.Context, today *time.Time) ([]ListStaleWatchlistEntriesRow, error)
+	ListWatchlistEntries(ctx context.Context) ([]ListWatchlistEntriesRow, error)
 	// Used by readiness probes and by smoke tests. It keeps the sqlc pipeline
 	// exercised until phase 02 adds real tables and queries.
 	Ping(ctx context.Context) (int64, error)
 	// River retries a failed job. Moving failed back to queued is the only
 	// transition that lets the retry claim the scan again.
 	RequeueFailedScan(ctx context.Context, id uuid.UUID) (int64, error)
+	SearchLiveWatchlistEntriesByName(ctx context.Context, arg SearchLiveWatchlistEntriesByNameParams) ([]SearchLiveWatchlistEntriesByNameRow, error)
 	// Trigram search ranked by similarity. The pg_trgm % operator keeps the index
 	// usable; similarity() orders the results so typos and word-order changes rank
 	// below exact matches.
@@ -73,6 +86,10 @@ type Querier interface {
 	UpsertProduct(ctx context.Context, arg UpsertProductParams) (UpsertProductRow, error)
 	UpsertSMPCDocument(ctx context.Context, arg UpsertSMPCDocumentParams) (SmpcDocument, error)
 	UpsertScanResult(ctx context.Context, arg UpsertScanResultParams) error
+	// Watchlist sources and entries (phase 06). Only the admin import command
+	// writes these rows; the worker and API only read them.
+	UpsertWatchlistSource(ctx context.Context, arg UpsertWatchlistSourceParams) (WatchlistSource, error)
+	WatchlistCounts(ctx context.Context) (WatchlistCountsRow, error)
 }
 
 var _ Querier = (*Queries)(nil)
