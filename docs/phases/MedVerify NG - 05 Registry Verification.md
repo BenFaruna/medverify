@@ -6,15 +6,15 @@
 
 ## 1. Deliverables checklist
 
-- [ ] MatchResult type with per-field comparison outcomes
-- [ ] Lookup strategy: exact NRN, then NRN variant candidates, then trigram name plus manufacturer
-- [ ] Name normalization for comparison (separate from storage normalization)
-- [ ] Field comparers: name, manufacturer, ingredients, strengths, expiry, registry status
-- [ ] Configurable thresholds (trigram similarity, strength tolerance) in a versioned config file
-- [ ] Ambiguity handling: multiple candidates returned, never silently picking one
-- [ ] A dataset-coverage concept: a distinct not\_found\_in\_dataset outcome
-- [ ] Integration with process\_scan: result stored in scan\_results.features
-- [ ] Benchmark for lookup latency
+- [x] MatchResult type with per-field comparison outcomes
+- [x] Lookup strategy: exact NRN, then NRN variant candidates, then trigram name plus manufacturer
+- [x] Name normalization for comparison (separate from storage normalization)
+- [x] Field comparers: name, manufacturer, ingredients, strengths, expiry, registry status
+- [x] Configurable thresholds (trigram similarity, strength tolerance) in a versioned config file
+- [x] Ambiguity handling: multiple candidates returned, never silently picking one
+- [x] A dataset-coverage concept: a distinct not\_found\_in\_dataset outcome
+- [x] Integration with process\_scan: result stored in scan\_results.features
+- [x] Benchmark for lookup latency
 
 ## 2. Tools needed
 
@@ -28,9 +28,25 @@
 
 ## 3. Setup required for success
 
-1. A seeded test dataset: 100 to 200 real products exported from the phase 02 sync, committed as a SQL or JSON fixture (public data only), including deliberately tricky cases: near-duplicate names, same name from different manufacturers, withdrawn, expired.
-2. Written matching rules agreed with a pharmacist: what counts as the same product name (brand versus generic wording), and how to treat strength differences.
-3. A decision, recorded in this document, on the minimum evidence needed for each outcome (see the table below).
+1. **Seeded dataset — done, with a caveat.** The committed phase 02 fixtures hold
+   198 distinct real products; two rows share an NRN and are skipped exactly as
+   the live sync skips them, leaving 196. Six clearly synthetic rows add the
+   cases the public slice does not contain: a unique name for `candidate_only`,
+   a near-identical pair for `ambiguous`, a withdrawn registration, an active
+   but lapsed registration, and a confusable NRN. See section 10.
+2. **Matching rules — implemented, sign-off open.** Names are normalized
+   (case, punctuation, dosage form and pack words) and compared by trigram
+   similarity; manufacturer and applicant are both compared with company
+   suffixes stripped; strengths are compared after unit conversion. A
+   pharmacist has not yet signed these off, so v1 is an engineering default.
+3. **Minimum evidence — recorded.** `matched_consistent` and
+   `matched_with_mismatch` require an exact NRN hit. `candidate_only` requires a
+   name (and manufacturer, when printed) above the configured thresholds, and
+   never carries a `Product`. `ambiguous` requires more than one candidate
+   within the ambiguity margin. `not_found_in_dataset` requires that neither an
+   NRN nor a name lookup found anything, and always carries dataset coverage.
+   `unreadable_input` requires nothing to look up. No outcome is a safety or
+   authenticity claim.
 
 ## 4. Outcomes and evidence
 
@@ -118,3 +134,86 @@ type MatchResult struct {
 - Keep comparison logic as pure functions that take two plain structs. The database layer only fetches candidates.
 - Never add a new outcome value without updating this document, the verdict engine mapping, and the OpenAPI enum.
 - Do not tune thresholds to make a single test pass. Add a test case that describes the real situation.
+
+## 10. Implementation notes
+
+- **Package seam.** `internal/verify` holds pure comparison functions over
+  `registry.Product` and `vision.LabelData`. The `Catalog` interface only
+  fetches candidates, and `registry.Store` is its only implementation; the
+  integration test asserts that with a compile-time check.
+- **Thresholds.** `internal/verify/config/v1.yaml` is embedded and versioned
+  `v1`. Unknown keys and out-of-range values are rejected, so a typo cannot
+  silently leave a threshold at zero. `VERIFY_CONFIG_FILE` can point at an
+  override for a preview; the version actually used is stored in
+  `dataset.config_version` on every result.
+- **Lookup order.** Exact NRN, then the phase 04 confusable variants, then a
+  trigram name search with manufacturer filtering or boosting. A variant hit
+  returns `candidate_only` with `variant_match: true`, never a match. A name
+  search whose best two candidates are within `ambiguity_margin` returns
+  `ambiguous` with up to five candidates.
+- **NRN variants.** `NRNPattern` allows a one- or two-letter prefix, so an OCR
+  reading of `O9-2006` is still a valid NRN and its `0`-for-`O` variant
+  `09-2006` is looked up. A letter substituted inside the numeric part fails
+  the shape check and is dropped as unreadable before verification, rather than
+  guessed.
+- **Name and manufacturer rules.** Names are NFKC-normalized, lowercased, and
+  stripped of punctuation plus dosage form and pack words (tablet, capsule,
+  syrup, bottle, BP, …) before trigram similarity. Manufacturer and applicant
+  are both compared because a label may print either; company suffixes (Ltd,
+  Limited, Plc, Pharmaceuticals, …) are stripped. Identical strings score 1.
+- **Strengths.** Compared after unit conversion (mcg, mg, g, kg; mL, L; IU,
+  unit, mEq, mmol, %), including per-volume denominators, so `100 mg/5 mL` and
+  `20 mg/mL` agree. An unparseable or differently shaped strength yields
+  `unknown`, never a disagreement.
+- **Unknown is not disagree.** A field the provider could not read yields
+  `unknown` and does not affect the outcome. `matched_consistent` therefore
+  means "nothing readable disagreed", not "everything was read".
+- **Expiry.** The printed expiry is compared with the scan time, not the
+  registry. A month-precision pack marked 01/2027 is usable through 31 January
+  2027. An expired label produces `matched_with_mismatch` with
+  `expired_on_label`; an expired or withdrawn registration adds its own reason.
+- **Storage.** Migration `00005` adds `scan_results.features jsonb NOT NULL
+  DEFAULT '{}'`. The worker runs the matcher after extraction, the scan view
+  exposes it as `features`, and the OpenAPI `RegistryVerification` schema pins
+  the outcome enum. A matcher failure fails the scan; a scan without a matcher
+  stores `{}`.
+- **Seeded dataset.** The integration suite loads every committed Greenbook
+  fixture page through the real parser and store: 198 distinct products, of
+  which two share an NRN and are skipped the way the live sync skips them,
+  leaving 196 real rows. Six synthetic rows (`synthetic-*`, NRNs `09-2001` to
+  `09-2006`) add the tricky cases. Synthetic rows are clearly marked and never
+  presented as real registrations.
+- **Benchmarks** (this machine, 200 iterations, seeded database): exact NRN
+  0.47 ms, fuzzy name plus manufacturer 1.71 ms. Targets are 50 ms and 200 ms.
+  Run with `TESTCONTAINERS_RYUK_DISABLED=true go test -tags=integration
+  -bench . ./internal/verify`.
+- **Tests.** Unit tests cover config validation, normalization tables, strength
+  units, unknown handling, expiry, threshold changes, and a rapid property that
+  a record compared with itself never disagrees. Integration tests cover all
+  nine outcome scenarios and prove the scan pipeline stores the result. Every
+  integration package starts its own Postgres.
+- **Scope kept out.** `cmd/eval` does not yet run registry verification over
+  the extraction eval set. That acceptance step is blocked by the missing
+  dataset (section 11), and adding an unexercised path would not prove
+  anything.
+
+## 11. Blockers and open items
+
+All four external blockers remain open. None is resolved by this phase's code:
+
+1. **Consented, double-labelled 100+ photo eval set.** The extraction harness
+   is ready; the dataset is absent. The phase 05 acceptance run — outcome
+   distribution over the eval set plus a hand review of 50
+   `matched_consistent` and `not_found_in_dataset` results — is blocked by it.
+2. **Live provider acceptance run.** Needs `VISION_API_KEY`, pinned model ids,
+   a provider spending cap, and data-handling approval.
+3. **Data-handling decision** for sending pack photos to a foreign provider.
+4. **NAFDAC data-sharing agreement** from phase 02.
+
+Open items specific to this phase:
+
+- Pharmacist sign-off of the matching rules and thresholds (section 3.2) has
+  not happened; v1 is an engineering default, not a clinical decision.
+- The 50-result review required by the Definition of Done is blocked by item 1.
+- A live Greenbook refresh is blocked by item 4, so this phase is demonstrated
+  only on the committed fixture slice.

@@ -1,5 +1,6 @@
 .env
 .freebuff/
+.cloud-attachments/
 
 # Build output
 /bin/

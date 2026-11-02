@@ -18,7 +18,7 @@ Update the Status column as work progresses (Not started, In progress, In review
 | 02 | Greenbook and leaflet ingestion | 01 | 2-3 | Done |
 | 03 | Scan pipeline skeleton | 01 | 1-2 | In review |
 | 04 | Label extraction | 03 | 2 | In review |
-| 05 | Registry verification | 02, 04 | 1 | Not started |
+| 05 | Registry verification | 02, 04 | 1 | In review |
 | 06 | Ingredient safety checks | 02, 05 | 2 | Not started |
 | 07 | Verdict engine | 05, 06 | 1 | Not started |
 | 08 | Leaflet indexing (RAG) | 02 | 2 | Not started |

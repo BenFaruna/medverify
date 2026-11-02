@@ -9,21 +9,29 @@ The system never says a medicine is safe, genuine, or authentic. See
 [docs/scoring-philosophy.md](docs/scoring-philosophy.md) and the product rules in
 [the build tracker](docs/phases/MedVerify%20NG%20-%2000%20Build%20Tracker%20and%20Engineering%20Conventions.md).
 
-Current state: **phase 4 (label extraction), in review**. Uploads are validated,
-re-encoded to strip EXIF and GPS, stored privately, processed by a River job,
-and exposed through POST/GET /v1/scans. Each image goes through a configurable
-vision provider; the default is a deterministic fake, and production can use a
-pinned Claude model. Model output is schema-constrained and then passed through
-deterministic validators and multi-image merge, so missing or ambiguous fields
-are reported as unreadable rather than guessed. Provider calls are recorded in
-`llm_calls` with cost and latency only.
+Current state: **phase 5 (registry verification), in review**. Uploads are
+validated, re-encoded to strip EXIF and GPS, stored privately, processed by a
+River job, and exposed through POST/GET /v1/scans. Each image goes through a
+configurable vision provider; the default is a deterministic fake, and
+production can use a pinned Claude model. Model output is schema-constrained and
+then passed through deterministic validators and multi-image merge, so missing
+or ambiguous fields are reported as unreadable rather than guessed. Provider
+calls are recorded in `llm_calls` with cost and latency only.
+
+After extraction the worker compares the label with the local Greenbook copy
+and stores a typed, explainable result in `scan_results.features`: one of
+`matched_consistent`, `matched_with_mismatch`, `candidate_only`, `ambiguous`,
+`not_found_in_dataset`, or `unreadable_input`, with per-field outcomes, stable
+reason codes, candidates, and dataset coverage. `not_found_in_dataset` means
+our copy has no match, never that a pack is fake.
 
 The phase 2 live-ingestion acceptance run, the consented 100+ photo extraction
-eval set, the live provider acceptance run, and the written NAFDAC data-sharing
-agreement are still open; see the
+eval set, the live provider acceptance run, the data-handling decision, and the
+written NAFDAC data-sharing agreement are still open; see the
 [phase 2 notes](docs/phases/MedVerify%20NG%20-%2002%20Greenbook%20and%20Leaflet%20Ingestion.md#10-implementation-notes),
 the [phase 3 notes](docs/phases/MedVerify%20NG%20-%2003%20Scan%20Pipeline%20Skeleton.md#9-implementation-notes),
-and the [phase 4 notes](docs/phases/MedVerify%20NG%20-%2004%20Label%20Extraction.md#9-implementation-notes).
+the [phase 4 notes](docs/phases/MedVerify%20NG%20-%2004%20Label%20Extraction.md#9-implementation-notes),
+and the [phase 5 notes](docs/phases/MedVerify%20NG%20-%2005%20Registry%20Verification.md#11-blockers-and-open-items).
 
 ## Quickstart
 
