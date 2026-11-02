@@ -5,7 +5,6 @@ package vision
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"sync"
 	"time"
@@ -30,12 +29,43 @@ type Request struct {
 	Images   []Image
 }
 
-// Result is a placeholder extraction result. Phase 4 replaces Fields with the
-// typed label model; phase 3 only needs success or failure and confidence.
+// Usage is the provider's reported resource use. Costs are estimates in USD.
+type Usage struct {
+	InputTokens  int
+	OutputTokens int
+	CostUSD      float64
+}
+
+// CallRecord is one provider call for the cost and latency ledger. It never
+// carries prompt text or image bytes.
+type CallRecord struct {
+	ScanID        string
+	Provider      string
+	Model         string
+	PromptVersion string
+	Kind          string
+	Latency       time.Duration
+	Usage         Usage
+	Outcome       string
+	ErrorCode     string
+}
+
+// Recorder persists a provider call. Implementations must not store prompts or
+// responses.
+type Recorder interface {
+	Record(ctx context.Context, call CallRecord) error
+}
+
+// Result is one provider extraction. Raw label values are untrusted until
+// ValidateLabel runs. Confidence is the coarse gate from phase 03; per-field
+// confidence lives on the label.
 type Result struct {
-	Provider   string
-	Fields     json.RawMessage
-	Confidence float64
+	Provider      string
+	Model         string
+	PromptVersion string
+	Label         *RawLabel
+	Confidence    float64
+	Usage         Usage
 }
 
 // Provider reads label text from pack photos.
@@ -61,10 +91,36 @@ type Fake struct {
 	Delay time.Duration
 }
 
-// NewFake returns a fake that completes a scan with a placeholder result.
+// NewFake returns a fake that completes a scan with a small, deterministic
+// label. Tests override Results when they need other values.
 func NewFake() *Fake {
-	return &Fake{Results: []Result{{Provider: "fake", Confidence: 1}}}
+	label := DefaultFakeLabel()
+	return &Fake{Results: []Result{{
+		Provider:      "fake",
+		Model:         "fake-v1",
+		PromptVersion: "fake",
+		Confidence:    1,
+		Label:         &label,
+	}}}
 }
+
+// DefaultFakeLabel is a complete, plausible label used by the fake provider and
+// by pipeline tests.
+func DefaultFakeLabel() RawLabel {
+	return RawLabel{
+		NRN:          RawField{Value: ptrString("01-2345"), Confidence: 0.98, Source: 1},
+		ProductName:  RawField{Value: ptrString("Paracetamol Tablets"), Confidence: 0.97, Source: 1},
+		Manufacturer: RawField{Value: ptrString("Example Pharma Ltd"), Confidence: 0.94, Source: 1},
+		BatchNo:      RawField{Value: ptrString("BATCH-001"), Confidence: 0.93, Source: 1},
+		MfgDate:      RawField{Value: ptrString("Jan 2026"), Confidence: 0.92, Source: 1},
+		ExpiryDate:   RawField{Value: ptrString("Jan 2028"), Confidence: 0.92, Source: 1},
+		Ingredients: []RawIngredient{
+			{Name: "Paracetamol", Strength: "500 mg", Confidence: 0.96, Source: 1},
+		},
+	}
+}
+
+func ptrString(value string) *string { return &value }
 
 // Extract implements Provider.
 func (f *Fake) Extract(ctx context.Context, request Request) (Result, error) {
@@ -97,7 +153,8 @@ func (f *Fake) Extract(ctx context.Context, request Request) (Result, error) {
 		return Result{}, f.Errors[index]
 	}
 	if len(f.Results) == 0 {
-		return Result{Provider: "fake", Confidence: 1}, nil
+		label := DefaultFakeLabel()
+		return Result{Provider: "fake", Model: "fake-v1", PromptVersion: "fake", Confidence: 1, Label: &label}, nil
 	}
 	if index < len(f.Results) {
 		return f.Results[index], nil
