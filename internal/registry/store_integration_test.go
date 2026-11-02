@@ -123,6 +123,72 @@ func TestSyncRecordsParseFailuresAndAbortsOverPolicy(t *testing.T) {
 	assert.Equal(t, 0, countRows(t, pool, "products"))
 }
 
+func TestLookupsByNRNNameAndIngredient(t *testing.T) {
+	pool, store := integrationStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)
+
+	products := []registry.Product{
+		{
+			SourceID: "p1", NRN: "04-1111", Name: "Paracetamol Tablets 500 mg",
+			Status: "Active", Raw: []byte(`{"product_id":"p1"}`), FetchedAt: now,
+			Ingredients: []registry.Ingredient{
+				{NameRaw: "Paracetamol", NameNorm: "paracetamol"},
+			},
+		},
+		{
+			SourceID: "p2", NRN: "04-2222", Name: "Paracetamol Syrup 120 mg",
+			Status: "Active", Raw: []byte(`{"product_id":"p2"}`), FetchedAt: now,
+			Ingredients: []registry.Ingredient{
+				{NameRaw: "Paracetamol", NameNorm: "paracetamol"},
+			},
+		},
+		{
+			SourceID: "p3", NRN: "04-3333", Name: "Ibuprofen Tablets 400 mg",
+			Status: "Active", Raw: []byte(`{"product_id":"p3"}`), FetchedAt: now,
+			Ingredients: []registry.Ingredient{
+				{NameRaw: "Ibuprofen", NameNorm: "ibuprofen"},
+			},
+		},
+	}
+	for _, product := range products {
+		_, err := store.UpsertProduct(ctx, product)
+		require.NoError(t, err)
+	}
+
+	got, found, err := store.GetByNRN(ctx, " 04 - 1111 ")
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, "p1", got.SourceID)
+
+	_, found, err = store.GetByNRN(ctx, "99-9999")
+	require.NoError(t, err)
+	assert.False(t, found, "not found is a data state, not an error")
+
+	results, err := store.SearchByName(ctx, "paracetamol tablets", 10)
+	require.NoError(t, err)
+	require.NotEmpty(t, results)
+	assert.Equal(t, "p1", results[0].Product.SourceID)
+	assert.Greater(t, results[0].Score, 0.0)
+
+	byIngredient, err := store.ListByIngredient(ctx, "Acetaminophen", 10)
+	require.NoError(t, err)
+	require.Len(t, byIngredient, 2)
+	assert.ElementsMatch(t, []string{"p1", "p2"}, []string{byIngredient[0].SourceID, byIngredient[1].SourceID})
+
+	ingredients, err := store.Ingredients(ctx, mustProductID(t, pool, "p1"))
+	require.NoError(t, err)
+	require.Len(t, ingredients, 1)
+	assert.Equal(t, "paracetamol", ingredients[0].NameNorm)
+}
+
+func mustProductID(t *testing.T, pool *pgxpool.Pool, sourceID string) int64 {
+	t.Helper()
+	var id int64
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT id FROM products WHERE source_id = $1`, sourceID).Scan(&id))
+	return id
+}
+
 func TestLeafletStorageRoundTrip(t *testing.T) {
 	pool, store := integrationStore(t)
 	ctx := context.Background()
