@@ -9,11 +9,13 @@ The system never says a medicine is safe, genuine, or authentic. See
 [docs/scoring-philosophy.md](docs/scoring-philosophy.md) and the product rules in
 [the build tracker](docs/phases/MedVerify%20NG%20-%2000%20Build%20Tracker%20and%20Engineering%20Conventions.md).
 
-Current state: **phase 2 (Greenbook and leaflet ingestion), in review**. The
-registry schema, polite fetcher, parser, normalizers, idempotent upsert, anomaly
-guard, nightly sync, leaflet pipeline, lookups, and ingestion report are in
-place. A one-off live sync and the written NAFDAC data-sharing agreement are
-still open; see [the phase document](docs/phases/MedVerify%20NG%20-%2002%20Greenbook%20and%20Leaflet%20Ingestion.md#10-implementation-notes).
+Current state: **phase 3 (scan pipeline skeleton), in review**. Uploads are
+validated, re-encoded to strip EXIF and GPS, stored privately, processed by a
+River job with a fake vision provider, and exposed through POST/GET /v1/scans.
+The phase 2 live-ingestion acceptance run and the written NAFDAC data-sharing
+agreement are still open; see the
+[phase 2 notes](docs/phases/MedVerify%20NG%20-%2002%20Greenbook%20and%20Leaflet%20Ingestion.md#10-implementation-notes)
+and the [phase 3 notes](docs/phases/MedVerify%20NG%20-%2003%20Scan%20Pipeline%20Skeleton.md#9-implementation-notes).
 
 ## Quickstart
 
@@ -25,6 +27,21 @@ make run          # builds images, migrates, waits for /readyz
 curl localhost:8080/healthz
 curl localhost:8080/readyz
 ```
+
+Upload a pack photo (the phase 3 pipeline uses a fake vision provider):
+
+```bash
+curl -i -X POST localhost:8080/v1/scans \
+  -H "X-API-Key: dev-api-key" \
+  -H "Idempotency-Key: demo-1" \
+  -F "images=@testdata/images/normal.jpg" \
+  -F "latitude=6.45" -F "longitude=3.39" -F "language=en"
+# 201 with status=completed, or 202 with a Location header; then:
+curl -H "X-API-Key: dev-api-key" localhost:8080/v1/scans/<id>
+```
+
+A result never says a medicine is safe, genuine, or authentic. `unreadable`
+means the photo could not be read confidently, not that the product is fake.
 
 Target: a healthy stack from a clean clone in under 15 minutes, including image
 pulls.

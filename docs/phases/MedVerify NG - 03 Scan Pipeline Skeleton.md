@@ -4,19 +4,23 @@
 
 **Depends on:** 01. **Blocks:** 04, 07, 11. **Read first:** 00 Build Tracker, 01 Foundations.
 
+**Status:** implementation complete; the fake-provider pipeline is covered by
+unit and integration tests. A real provider and the acceptance run against the
+Compose stack arrive with phase 04.
+
 ## 1. Deliverables checklist
 
-- [ ] Migrations: api\_clients (stub), scans, scan\_images, scan\_results, idempotency\_keys
-- [ ] POST /v1/scans: multipart upload of 1 to 4 images, optional coarse location, optional language
-- [ ] GET /v1/scans/{id}: status and result
-- [ ] Image validation, orientation fix, metadata stripping, re-encoding
-- [ ] Object storage client (S3 compatible) with random keys
-- [ ] Scan state machine: queued, processing, completed, unreadable, failed
-- [ ] River job process\_scan that calls the vision interface (fake for now)
-- [ ] Sync-with-timeout behavior: wait up to a configured time for completion, otherwise return 202 and let the client poll
-- [ ] Idempotency-Key header support
-- [ ] Placeholder API key middleware (full version in phase 11)
-- [ ] OpenAPI entries for both endpoints
+- [x] Migrations: api\_clients (stub), scans, scan\_images, scan\_results, idempotency\_keys
+- [x] POST /v1/scans: multipart upload of 1 to 4 images, optional coarse location, optional language
+- [x] GET /v1/scans/{id}: status and result
+- [x] Image validation, orientation fix, metadata stripping, re-encoding
+- [x] Object storage client (S3 compatible) with random keys
+- [x] Scan state machine: queued, processing, completed, unreadable, failed
+- [x] River job process\_scan that calls the vision interface (fake for now)
+- [x] Sync-with-timeout behavior: wait up to a configured time for completion, otherwise return 202 and let the client poll
+- [x] Idempotency-Key header support
+- [x] Placeholder API key middleware (full version in phase 11)
+- [x] OpenAPI entries for both endpoints
 
 ## 2. Tools needed
 
@@ -106,3 +110,35 @@
 - Implement validation as small pure functions that take bytes and return typed errors, so each can be unit tested without HTTP.
 - Do not store original uploads, only the re-encoded images.
 - If a test needs a new fixture image, generate it in code or commit a very small file. Do not commit large photos.
+
+## 9. Implementation notes
+
+- `internal/scan` owns the domain: `PrepareImage` (sniff, pixel guard,
+  orientation, re-encode, SHA-256), the state machine, the store, the service,
+  and the HTTP handlers.
+- `internal/vision` defines `Provider` and a scriptable `Fake`. Phase 03 wires
+  only the fake; phase 04 adds the real provider behind the same interface.
+- `internal/platform/jobs/scan.go` defines the `process_scan` River job. The API
+  process creates an insert-only River client (no workers, not started); the
+  worker process registers `ProcessScanWorker`.
+- Upload order is enforced in this order: request cap, multipart parse, per-file
+  cap, signature sniff, `DecodeConfig` pixel guard, decode with EXIF orientation,
+  re-encode to JPEG, then store under `scans/{scan_id}/{random}.jpg`.
+- `scans.location_cell` stores a one-decimal grid cell only. Raw latitude and
+  longitude are never written to the database or logs.
+- The state machine is enforced by guarded updates: `queued -> processing` when
+  a worker claims a row, and `processing -> completed|unreadable|failed` when it
+  finishes. A River retry moves `failed -> queued` before claiming again.
+- Idempotency is per placeholder auth principal plus key, with the request body
+  hash stored. A concurrent replay loses the insert race, deletes its uploaded
+  objects, and returns the winning scan.
+- The placeholder auth is a single `API_KEY` compared in constant time against
+  `X-API-Key`. `api_clients` exists as a stub for phase 11.
+- `GET /v1/scans/{id}` returns `verdict: null` until phase 07 and `extracted:
+  null` until phase 04. `reasons` is an empty array. A low-confidence or
+  unreadable result is `unreadable`, never a guess.
+- Integration tests use `storage.Fake`, a scriptable vision fake, and real
+  Postgres. No test calls a real provider or a network image service.
+- Still open for phase 04: the real vision provider, provider selection in
+  config, and an acceptance run of the Compose stack with the documented curl
+  flow.

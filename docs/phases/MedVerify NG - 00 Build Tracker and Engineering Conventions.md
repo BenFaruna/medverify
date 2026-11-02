@@ -16,7 +16,7 @@ Update the Status column as work progresses (Not started, In progress, In review
 | --- | --- | --- | --- | --- |
 | 01 | Foundations | none | 1-2 | Done |
 | 02 | Greenbook and leaflet ingestion | 01 | 2-3 | In review |
-| 03 | Scan pipeline skeleton | 01 | 1-2 | Not started |
+| 03 | Scan pipeline skeleton | 01 | 1-2 | In review |
 | 04 | Label extraction | 03 | 2 | Not started |
 | 05 | Registry verification | 02, 04 | 1 | Not started |
 | 06 | Ingredient safety checks | 02, 05 | 2 | Not started |
