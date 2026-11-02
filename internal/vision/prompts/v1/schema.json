@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Medicine pack label",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "nrn",
+    "product_name",
+    "manufacturer",
+    "batch_no",
+    "mfg_date",
+    "expiry_date",
+    "ingredients",
+    "unreadable"
+  ],
+  "properties": {
+    "nrn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "confidence", "source"],
+      "properties": {
+        "value": {"type": ["string", "null"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "source": {"type": "integer", "minimum": 1}
+      }
+    },
+    "product_name": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "confidence", "source"],
+      "properties": {
+        "value": {"type": ["string", "null"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "source": {"type": "integer", "minimum": 1}
+      }
+    },
+    "manufacturer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "confidence", "source"],
+      "properties": {
+        "value": {"type": ["string", "null"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "source": {"type": "integer", "minimum": 1}
+      }
+    },
+    "batch_no": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "confidence", "source"],
+      "properties": {
+        "value": {"type": ["string", "null"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "source": {"type": "integer", "minimum": 1}
+      }
+    },
+    "mfg_date": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "confidence", "source"],
+      "properties": {
+        "value": {"type": ["string", "null"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "source": {"type": "integer", "minimum": 1}
+      }
+    },
+    "expiry_date": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "confidence", "source"],
+      "properties": {
+        "value": {"type": ["string", "null"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "source": {"type": "integer", "minimum": 1}
+      }
+    },
+    "ingredients": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "strength", "confidence", "source"],
+        "properties": {
+          "name": {"type": "string"},
+          "strength": {"type": "string"},
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "source": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "unreadable": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  }
+}

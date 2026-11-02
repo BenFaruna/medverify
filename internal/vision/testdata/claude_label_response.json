@@ -1,0 +1,27 @@
+{
+  "id": "msg_recorded_001",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-4-5-20250929",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_recorded_001",
+      "name": "record_label",
+      "input": {
+        "nrn": {"value": "01-2345", "confidence": 0.97, "source": 1},
+        "product_name": {"value": "Paracetamol Tablets BP 500 mg", "confidence": 0.96, "source": 1},
+        "manufacturer": {"value": "Example Pharma Ltd, Lagos", "confidence": 0.93, "source": 1},
+        "batch_no": {"value": "PCM-2026-014", "confidence": 0.91, "source": 1},
+        "mfg_date": {"value": "01/2026", "confidence": 0.9, "source": 1},
+        "expiry_date": {"value": "01/2028", "confidence": 0.9, "source": 1},
+        "ingredients": [
+          {"name": "Paracetamol", "strength": "500 mg", "confidence": 0.95, "source": 1}
+        ],
+        "unreadable": []
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "usage": {"input_tokens": 1500, "output_tokens": 220}
+}

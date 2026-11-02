@@ -1,0 +1,11 @@
+{
+  "id": "msg_recorded_002",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-4-5-20250929",
+  "content": [
+    {"type": "text", "text": "I cannot read this image."}
+  ],
+  "stop_reason": "refusal",
+  "usage": {"input_tokens": 1400, "output_tokens": 12}
+}
