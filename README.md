@@ -9,8 +9,11 @@ The system never says a medicine is safe, genuine, or authentic. See
 [docs/scoring-philosophy.md](docs/scoring-philosophy.md) and the product rules in
 [the build tracker](docs/phases/MedVerify%20NG%20-%2000%20Build%20Tracker%20and%20Engineering%20Conventions.md).
 
-Current state: **phase 1 (foundations)**. The skeleton, health checks,
-migrations, job wiring, and CI exist; no domain logic does yet.
+Current state: **phase 2 (Greenbook and leaflet ingestion), in review**. The
+registry schema, polite fetcher, parser, normalizers, idempotent upsert, anomaly
+guard, nightly sync, leaflet pipeline, lookups, and ingestion report are in
+place. A one-off live sync and the written NAFDAC data-sharing agreement are
+still open; see [the phase document](docs/phases/MedVerify%20NG%20-%2002%20Greenbook%20and%20Leaflet%20Ingestion.md#10-implementation-notes).
 
 ## Quickstart
 
@@ -34,6 +37,9 @@ make test-integration  # testcontainers: pgvector Postgres and S3 storage per pa
 make lint              # golangci-lint
 make migrate-status    # against the database in .env
 make job-noop          # enqueue a no-op job; the worker logs it
+make sync-greenbook    # run a full Greenbook product sync now
+make sync-leaflets     # download and extract pending leaflets
+make registry-report   # counts, OCR needs, unknown ingredients, recent runs
 make logs              # follow service logs
 make down              # stop; `make clean` also deletes volumes
 ```
@@ -46,7 +52,7 @@ Run the binaries on the host instead of in Compose with `go run ./cmd/api` and
 ```
 cmd/api      HTTP server
 cmd/worker   River background workers
-cmd/admin    migrations, storage bootstrap, manual job enqueue
+cmd/admin    migrations, storage bootstrap, manual job enqueue, syncs, report
 cmd/eval     evaluation runner (phase 10)
 internal/
   platform/  config, logging, http helpers, db, jobs, clock, auth, ratelimit
@@ -59,8 +65,8 @@ testdata/    fixtures and golden files (added with the first parser)
 evals/       versioned eval datasets (phase 10)
 ```
 
-Packages without behaviour in phase 1 hold only a `doc.go` that names the phase
-that fills them in.
+Packages not yet in use hold only a `doc.go` that names the phase that fills
+them in.
 
 ## Conventions
 

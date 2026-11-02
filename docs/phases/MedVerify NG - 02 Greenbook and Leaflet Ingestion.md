@@ -4,19 +4,23 @@
 
 **Depends on:** 01. **Blocks:** 05, 06, 08. **Read first:** 00 Build Tracker, 01 Foundations.
 
+**Status:** implementation complete; the one-off live acceptance run and the
+written NAFDAC permission are still open. See the spike report and
+[data sources](../data-sources.md#permission-status).
+
 ## 1. Deliverables checklist
 
 - [x] Spike report: captured sample payloads and a written description of the real field names and formats
-- [ ] Greenbook fetcher with throttling, retries, caching, and a kill switch
-- [ ] Parser from raw payload to domain structs
-- [ ] NormalizeNRN, NormalizeIngredient, ParseStrength functions with a synonym table
-- [ ] Tables: products, product\_ingredients, sync\_runs, smpc\_documents, smpc\_sections
-- [ ] Idempotent upsert by NRN, with the raw payload kept as jsonb
-- [ ] Nightly River job plus a manual admin command to run a sync
-- [ ] Anomaly guard that aborts a sync when the result looks wrong
-- [ ] Leaflet downloader, text extractor, and section splitter
-- [ ] Lookup queries: by NRN, by trigram name search, by ingredient
-- [ ] Ingestion report command: counts, failures, leaflets needing OCR
+- [x] Greenbook fetcher with throttling, retries, caching, and a kill switch
+- [x] Parser from raw payload to domain structs
+- [x] NormalizeNRN, NormalizeIngredient, ParseStrength functions with a synonym table
+- [x] Tables: products, product\_ingredients, sync\_runs, smpc\_documents, smpc\_sections
+- [x] Idempotent upsert by source\_id (NRN where present), with the raw payload kept as jsonb
+- [x] Nightly River job plus a manual admin command to run a sync
+- [x] Anomaly guard that aborts a sync when the result looks wrong
+- [x] Leaflet downloader, text extractor, and section splitter
+- [x] Lookup queries: by NRN, by trigram name search, by ingredient
+- [x] Ingestion report command: counts, failures, leaflets needing OCR
 
 ## 2. Tools needed
 
@@ -160,3 +164,21 @@ CREATE TABLE smpc_sections (
 - Start with the spike and commit the fixtures before writing the parser.
 - Never hardcode field names from this document without confirming them in the fixtures.
 - Do not run the live fetcher in tests or CI. All network access goes through the fake server.
+
+## 10. Implementation notes
+
+- Products are keyed by `source_id`; `nrn` is nullable and unique when present.
+- Nightly sync: the worker registers the `greenbook_sync` periodic job when
+  `GREENBOOK_ENABLED=true` and `GREENBOOK_SYNC_INTERVAL` is positive. A manual
+  run is `medverify-admin sync greenbook [--override-anomaly]`.
+- Leaflets are processed separately with
+  `medverify-admin sync leaflets [--limit N]`, which downloads to object
+  storage, records `ok`, `scanned_needs_ocr`, `too_large`, or `failed`, and
+  splits extracted text into sections.
+- The report is `medverify-admin registry report`.
+- CI uses `httptest` and fixtures only; it never calls the live Greenbook or a
+  model provider.
+- Still open: a one-off full sync against the live site, reviewed with the
+  project lead (products ingested, ingredient parse rate, leaflets downloaded,
+  leaflets needing OCR, leaflets with no sections), and the written NAFDAC
+  permission recorded in `docs/data-sources.md`.

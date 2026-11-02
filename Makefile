@@ -101,6 +101,18 @@ storage-init: ## Create the object storage bucket
 job-noop: ## Enqueue a no-op job for the worker
 	@set -a && . ./$(ENV_FILE) && set +a && $(GO) run ./cmd/admin job noop
 
+.PHONY: sync-greenbook
+sync-greenbook: ## Run a full Greenbook product sync now
+	@set -a && . ./$(ENV_FILE) && set +a && $(GO) run ./cmd/admin sync greenbook
+
+.PHONY: sync-leaflets
+sync-leaflets: ## Download and extract pending leaflets
+	@set -a && . ./$(ENV_FILE) && set +a && $(GO) run ./cmd/admin sync leaflets
+
+.PHONY: registry-report
+registry-report: ## Show ingestion counts, leaflet OCR needs, and recent runs
+	@set -a && . ./$(ENV_FILE) && set +a && $(GO) run ./cmd/admin registry report
+
 .PHONY: eval
 eval: ## Run the evaluation suite (phase 10)
 	$(GO) run ./cmd/eval
