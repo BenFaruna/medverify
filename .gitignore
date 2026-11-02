@@ -14,3 +14,8 @@
 
 # Property-test failure artefacts
 **/testdata/rapid/
+
+# Real extraction eval data contains consented pack photos and hand labels.
+# Keep it in the private evidence store; only the format notes are committed.
+/testdata/eval/*
+!/testdata/eval/README.md
