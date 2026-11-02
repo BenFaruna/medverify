@@ -296,6 +296,17 @@ func printSyncSummary(summary registry.SyncSummary) {
 	}
 	_, _ = fmt.Fprintf(w, "unknown ingredient names\t%d\n", len(summary.UnknownIngredients))
 	_ = w.Flush()
+
+	if len(summary.RowFailures) > 0 {
+		_, _ = fmt.Fprintf(os.Stdout, "\nproduct failures (%d):\n", len(summary.RowFailures))
+		failures := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		_, _ = fmt.Fprintln(failures, "SOURCE_ID\tNRN\tNAME\tERROR")
+		for _, failure := range summary.RowFailures {
+			_, _ = fmt.Fprintf(failures, "%s\t%s\t%s\t%s\n",
+				failure.SourceID, failure.NRN, failure.Name, truncate(failure.Err, 160))
+		}
+		_ = failures.Flush()
+	}
 }
 
 func printLeafletSummary(summary registry.LeafletSummary) {

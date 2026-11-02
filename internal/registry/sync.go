@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/benfaruna/medverify/internal/platform/clock"
@@ -107,6 +109,17 @@ type SyncOptions struct {
 	Trigger string
 }
 
+// RowFailure records a product the sync could not write. Duplicate NRNs are
+// the expected case: two Greenbook records can reuse one number, and the
+// database keeps NRN unique. The run continues so one conflict cannot block
+// the rest of the dataset.
+type RowFailure struct {
+	SourceID string
+	NRN      string
+	Name     string
+	Err      string
+}
+
 // SyncSummary is returned to the worker and the admin command.
 type SyncSummary struct {
 	RunID              int64
@@ -115,6 +128,7 @@ type SyncSummary struct {
 	RowsAdded          int
 	RowsChanged        int
 	RowsFailed         int
+	RowFailures        []RowFailure
 	Anomaly            Anomaly
 	AnomalyOverridden  bool
 	UnknownIngredients map[string]int
@@ -239,7 +253,28 @@ func (s *Syncer) Sync(ctx context.Context, opts SyncOptions) (SyncSummary, error
 		}
 		change, err := s.store.UpsertProduct(ctx, product)
 		if err != nil {
-			return fail(err)
+			if !isDuplicateKey(err) {
+				return fail(err)
+			}
+			// A duplicate NRN is a source-data conflict, not a reason to
+			// abandon the other ~9,000 products. Keep the first record, log the
+			// loser with enough detail to investigate, and move on.
+			summary.RowsFailed++
+			failure := RowFailure{
+				SourceID: product.SourceID,
+				NRN:      product.NRN,
+				Name:     product.Name,
+				Err:      err.Error(),
+			}
+			summary.RowFailures = append(summary.RowFailures, failure)
+			s.logger.WarnContext(ctx, "greenbook product skipped: duplicate key",
+				slog.Int64("run_id", runID),
+				slog.String("source_id", product.SourceID),
+				slog.String("nrn", product.NRN),
+				slog.String("name", product.Name),
+				slog.Any("err", err),
+			)
+			continue
 		}
 		switch {
 		case change.Inserted:
@@ -253,9 +288,12 @@ func (s *Syncer) Sync(ctx context.Context, opts SyncOptions) (SyncSummary, error
 	summary.FinishedAt = s.clock.Now().UTC()
 	summary.UnknownIngredients = s.normalizer.Unknown()
 
-	runError := ""
+	runError := rowFailureSummary(summary.RowFailures)
 	if summary.AnomalyOverridden {
-		runError = "overridden: " + summary.Anomaly.Error()
+		if runError != "" {
+			runError += "; "
+		}
+		runError += "overridden: " + summary.Anomaly.Error()
 	}
 	finishErr := finish(SyncResult{
 		RowsSeen:    summary.RowsSeen,
@@ -277,4 +315,47 @@ func (s *Syncer) Sync(ctx context.Context, opts SyncOptions) (SyncSummary, error
 		slog.Int("unknown_ingredients", len(summary.UnknownIngredients)),
 	)
 	return summary, nil
+}
+
+// uniqueViolation is PostgreSQL SQLSTATE 23505. The only expected source of it
+// during a greenbook upsert is the nullable unique NRN index.
+const uniqueViolation = "23505"
+
+func isDuplicateKey(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == uniqueViolation
+}
+
+// rowFailureSummary is persisted in sync_runs.error so an operator can see why
+// rows were skipped even after the process exits. Keep it short; the full list
+// is logged per row.
+func rowFailureSummary(failures []RowFailure) string {
+	if len(failures) == 0 {
+		return ""
+	}
+	const shown = 5
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d product(s) skipped by duplicate key: ", len(failures))
+	for i, failure := range failures {
+		if i >= shown {
+			break
+		}
+		if i > 0 {
+			b.WriteString("; ")
+		}
+		fmt.Fprintf(&b, "source_id=%s nrn=%q name=%q error=%s",
+			failure.SourceID, failure.NRN, failure.Name, shortError(failure.Err))
+	}
+	if len(failures) > shown {
+		fmt.Fprintf(&b, "; and %d more", len(failures)-shown)
+	}
+	return b.String()
+}
+
+func shortError(message string) string {
+	const limit = 200
+	if len(message) <= limit {
+		return message
+	}
+	return message[:limit] + "..."
 }

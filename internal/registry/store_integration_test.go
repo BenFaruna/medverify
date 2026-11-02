@@ -189,6 +189,33 @@ func mustProductID(t *testing.T, pool *pgxpool.Pool, sourceID string) int64 {
 	return id
 }
 
+func TestSyncSkipsDuplicateNRNAndContinues(t *testing.T) {
+	pool, store := integrationStore(t)
+	ctx := context.Background()
+
+	source := &stubSource{page: duplicateNRNPage(t)}
+	syncer := newSyncer(t, source, store, registry.AnomalyPolicy{})
+
+	summary, err := syncer.Sync(ctx, registry.SyncOptions{Trigger: "test"})
+	require.NoError(t, err, "one duplicate key must not abort the whole sync")
+	assert.Equal(t, "succeeded", summary.Status)
+	assert.Equal(t, 2, summary.RowsAdded)
+	assert.Equal(t, 1, summary.RowsFailed)
+	require.Len(t, summary.RowFailures, 1)
+	assert.Equal(t, "2", summary.RowFailures[0].SourceID)
+	assert.Equal(t, "04-5555", summary.RowFailures[0].NRN)
+	assert.Contains(t, summary.RowFailures[0].Err, "products_nrn_key")
+
+	assert.Equal(t, 2, countRows(t, pool, "products"))
+	var winner string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT source_id FROM products WHERE nrn = '04-5555'`).Scan(&winner))
+	assert.Equal(t, "1", winner, "the first record keeps the NRN")
+
+	var runError string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT error FROM sync_runs ORDER BY id DESC LIMIT 1`).Scan(&runError))
+	assert.Contains(t, runError, "source_id=2")
+}
+
 func TestIngestionReportSummarisesRegistry(t *testing.T) {
 	_, store := integrationStore(t)
 	ctx := context.Background()
@@ -358,6 +385,24 @@ func pageWithoutRequiredFields(t *testing.T, rows int) []byte {
 	page := map[string]any{
 		"recordsTotal":    rows,
 		"recordsFiltered": rows,
+		"data":            items,
+	}
+	out, err := json.Marshal(page)
+	require.NoError(t, err)
+	return out
+}
+
+func duplicateNRNPage(t *testing.T) []byte {
+	t.Helper()
+
+	items := []map[string]any{
+		{"product_id": 1, "product_name": "First Paracetamol", "NAFDAC": "04-5555", "status": "Active"},
+		{"product_id": 2, "product_name": "Second Paracetamol", "NAFDAC": "04-5555", "status": "Active"},
+		{"product_id": 3, "product_name": "Third Product", "NAFDAC": "04-6666", "status": "Active"},
+	}
+	page := map[string]any{
+		"recordsTotal":    len(items),
+		"recordsFiltered": len(items),
 		"data":            items,
 	}
 	out, err := json.Marshal(page)
