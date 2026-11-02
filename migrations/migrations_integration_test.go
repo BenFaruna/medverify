@@ -40,14 +40,11 @@ func TestMigrationsStatusReportsApplied(t *testing.T) {
 
 	statuses, err := migrations.Status(ctx, databaseURL)
 	require.NoError(t, err)
-	require.Len(t, statuses, 4)
-	for _, status := range statuses {
+	require.Len(t, statuses, 5)
+	for i, status := range statuses {
 		assert.Equal(t, "applied", string(status.State))
+		assert.Equal(t, int64(i+1), status.Source.Version)
 	}
-	assert.Equal(t, int64(1), statuses[0].Source.Version)
-	assert.Equal(t, int64(2), statuses[1].Source.Version)
-	assert.Equal(t, int64(3), statuses[2].Source.Version)
-	assert.Equal(t, int64(4), statuses[3].Source.Version)
 }
 
 func TestScanTablesExistAfterMigrateUp(t *testing.T) {
@@ -61,6 +58,10 @@ func TestScanTablesExistAfterMigrateUp(t *testing.T) {
 	} {
 		assert.True(t, tableExists(t, databaseURL, table), "table %s should exist", table)
 	}
+
+	// Phase 05 stores registry verification on the result row.
+	assert.True(t, columnExists(t, databaseURL, "scan_results", "features"),
+		"scan_results.features should exist after migration 00005")
 }
 
 func TestRegistryTablesExistAfterMigrateUp(t *testing.T) {
@@ -105,6 +106,24 @@ func assertExtensions(t *testing.T, databaseURL string, want ...string) {
 	for _, name := range want {
 		assert.Contains(t, names, name)
 	}
+}
+
+func columnExists(t *testing.T, databaseURL, table, column string) bool {
+	t.Helper()
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, databaseURL)
+	require.NoError(t, err)
+	defer pool.Close()
+
+	var exists bool
+	err = pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_name = $1 AND column_name = $2
+		)`, table, column).Scan(&exists)
+	require.NoError(t, err)
+	return exists
 }
 
 func tableExists(t *testing.T, databaseURL, table string) bool {

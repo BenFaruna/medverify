@@ -22,6 +22,7 @@ import (
 	"github.com/benfaruna/medverify/internal/platform/testkit"
 	"github.com/benfaruna/medverify/internal/scan"
 	"github.com/benfaruna/medverify/internal/storage"
+	"github.com/benfaruna/medverify/internal/verify"
 	"github.com/benfaruna/medverify/internal/vision"
 	"github.com/benfaruna/medverify/migrations"
 )
@@ -80,6 +81,9 @@ func TestProcessCompletesWithFakeProvider(t *testing.T) {
 	assert.Nil(t, finished.Result.Verdict)
 	assert.NotNil(t, finished.Result.Extracted)
 	assert.NotNil(t, finished.CompletedAt)
+	// No matcher is configured here, so verification is explicitly empty
+	// rather than missing.
+	assert.JSONEq(t, "{}", string(finished.Result.Features))
 
 	var extracted vision.LabelData
 	require.NoError(t, json.Unmarshal(finished.Result.Extracted, &extracted))
@@ -95,6 +99,42 @@ func TestProcessCompletesWithFakeProvider(t *testing.T) {
 	assert.Nil(t, view.Verdict)
 	assert.JSONEq(t, "[]", string(view.Reasons))
 	assert.NotNil(t, view.Extracted)
+}
+
+func TestProcessStoresRegistryVerification(t *testing.T) {
+	pipeline := newPipeline(t)
+	ctx := context.Background()
+	pipeline.matcher = &fakeMatcher{result: verify.MatchResult{
+		Outcome: verify.CandidateOnly,
+		Fields:  map[string]verify.FieldComparison{},
+		Candidates: []verify.ProductRef{{
+			SourceID: "p1", NRN: "01-2345", Name: "Paracetamol Tablets 500 mg",
+			Status: "Active", Score: 0.91,
+		}},
+		Dataset: verify.DatasetInfo{ConfigVersion: verify.ConfigVersion, Products: 198},
+	}}
+	pipeline.rebuild(t)
+
+	created := createScan(t, pipeline, "hash-verify")
+	require.NoError(t, pipeline.service.Process(ctx, created.ID.String()))
+
+	finished, err := pipeline.service.Get(ctx, created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, scan.StatusCompleted, finished.Status)
+	require.NotNil(t, finished.Result.Features, "verification must be stored on the result row")
+
+	var features verify.MatchResult
+	require.NoError(t, json.Unmarshal(finished.Result.Features, &features))
+	assert.Equal(t, verify.CandidateOnly, features.Outcome)
+	require.Len(t, features.Candidates, 1)
+	assert.Equal(t, "01-2345", features.Candidates[0].NRN)
+	assert.Equal(t, verify.ConfigVersion, features.Dataset.ConfigVersion)
+
+	// The API view exposes the same explainable result.
+	view := finished.View()
+	require.NotNil(t, view.Features)
+	assert.Contains(t, string(view.Features), "candidate_only")
+	assert.Equal(t, 1, pipeline.matcher.(*fakeMatcher).calls)
 }
 
 func TestProcessMarksFailedThenRetrySucceeds(t *testing.T) {
@@ -235,9 +275,23 @@ type testPipeline struct {
 	objects  *storage.Fake
 	provider *vision.Fake
 	recorder vision.Recorder
+	matcher  scan.RegistryMatcher
 	enqueuer *fakeEnqueuer
 	service  *scan.Service
 	logs     *bytes.Buffer
+}
+
+// fakeMatcher stands in for registry verification so the pipeline test never
+// needs a seeded registry.
+type fakeMatcher struct {
+	result verify.MatchResult
+	err    error
+	calls  int
+}
+
+func (f *fakeMatcher) Match(context.Context, vision.LabelData) (verify.MatchResult, error) {
+	f.calls++
+	return f.result, f.err
 }
 
 func newPipeline(t *testing.T) *testPipeline {
@@ -280,6 +334,7 @@ func (p *testPipeline) rebuildWithLogger(t *testing.T, logger *slog.Logger) {
 		Objects:       p.objects,
 		Provider:      p.provider,
 		Recorder:      p.recorder,
+		Matcher:       p.matcher,
 		Enqueuer:      p.enqueuer,
 		Logger:        logger,
 		MaxImages:     4,

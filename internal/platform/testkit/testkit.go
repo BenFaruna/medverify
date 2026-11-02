@@ -48,7 +48,7 @@ const (
 )
 
 // Postgres starts a pgvector-enabled Postgres and returns its connection URL.
-func Postgres(t *testing.T) string {
+func Postgres(t testing.TB) string {
 	t.Helper()
 
 	hostPort := pinnedHostPort(t)
@@ -74,7 +74,7 @@ func Postgres(t *testing.T) string {
 
 // ObjectStorage starts an S3-compatible store, creates the bucket, and returns
 // a ready store plus its host endpoint.
-func ObjectStorage(t *testing.T) (*storage.S3, string) {
+func ObjectStorage(t testing.TB) (*storage.S3, string) {
 	t.Helper()
 
 	hostPort := pinnedHostPort(t)
@@ -107,7 +107,7 @@ func ObjectStorage(t *testing.T) (*storage.S3, string) {
 
 // StoreWithBucket builds a second client on an existing endpoint, optionally
 // pointing at a bucket that does not exist. Used to test readiness failures.
-func StoreWithBucket(t *testing.T, endpoint, bucket string) *storage.S3 {
+func StoreWithBucket(t testing.TB, endpoint, bucket string) *storage.S3 {
 	t.Helper()
 
 	store, err := storage.NewS3(storage.Options{
@@ -121,7 +121,7 @@ func StoreWithBucket(t *testing.T, endpoint, bucket string) *storage.S3 {
 	return store
 }
 
-func ensureBucket(t *testing.T, store *storage.S3) {
+func ensureBucket(t testing.TB, store *storage.S3) {
 	t.Helper()
 
 	deadline := time.Now().Add(time.Minute)
@@ -138,7 +138,7 @@ func ensureBucket(t *testing.T, store *storage.S3) {
 	require.NoError(t, lastErr, "create test bucket")
 }
 
-func start(t *testing.T, req testcontainers.ContainerRequest) testcontainers.Container {
+func start(t testing.TB, req testcontainers.ContainerRequest) testcontainers.Container {
 	t.Helper()
 
 	container, err := testcontainers.GenericContainer(context.Background(), testcontainers.GenericContainerRequest{
@@ -155,7 +155,7 @@ func start(t *testing.T, req testcontainers.ContainerRequest) testcontainers.Con
 
 // pinnedHostPort returns a free TCP port from a range below the ephemeral port
 // range that Docker allocates from.
-func pinnedHostPort(t *testing.T) int {
+func pinnedHostPort(t testing.TB) int {
 	t.Helper()
 
 	const low, high = 24000, 32000
