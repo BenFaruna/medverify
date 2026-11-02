@@ -56,12 +56,19 @@ type WorkerOption func(*workerOptions)
 
 type workerOptions struct {
 	greenbook GreenbookRunner
+	scan      ProcessScanRunner
 }
 
 // WithGreenbookRunner registers the Greenbook sync worker. Without it the job
 // kind is unknown to this process.
 func WithGreenbookRunner(runner GreenbookRunner) WorkerOption {
 	return func(opts *workerOptions) { opts.greenbook = runner }
+}
+
+// WithScanRunner registers the scan extraction worker. The API process omits
+// it because it only enqueues work.
+func WithScanRunner(runner ProcessScanRunner) WorkerOption {
+	return func(opts *workerOptions) { opts.scan = runner }
 }
 
 // NewWorkers registers every worker this build knows about.
@@ -75,6 +82,9 @@ func NewWorkers(logger *slog.Logger, opts ...WorkerOption) *river.Workers {
 	river.AddWorker(workers, &NoopWorker{Logger: logger})
 	if options.greenbook != nil {
 		river.AddWorker(workers, &GreenbookSyncWorker{Runner: options.greenbook, Logger: logger})
+	}
+	if options.scan != nil {
+		river.AddWorker(workers, &ProcessScanWorker{Runner: options.scan, Logger: logger})
 	}
 	return workers
 }
@@ -103,9 +113,15 @@ func NewClient(pool *pgxpool.Pool, logger *slog.Logger, workers *river.Workers, 
 	riverConfig := &river.Config{
 		Logger:  logger,
 		Workers: workers,
-		Queues: map[string]river.QueueConfig{
+	}
+	if workers != nil {
+		riverConfig.Queues = map[string]river.QueueConfig{
 			river.QueueDefault: {MaxWorkers: concurrency},
-		},
+		}
+	} else {
+		// Insert-only client: it does not fetch or run jobs, so it must not
+		// claim to know the worker kinds registered in another process.
+		riverConfig.SkipUnknownJobCheck = true
 	}
 	for _, opt := range opts {
 		opt(riverConfig)
