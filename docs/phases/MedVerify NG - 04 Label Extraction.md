@@ -6,17 +6,17 @@
 
 ## 1. Deliverables checklist
 
-- [ ] VisionProvider interface and LabelData types
-- [ ] Provider implementation 1: Claude vision (structured output)
-- [ ] Provider implementation 2: Google Vision or a second model, behind the same interface (for comparison and fallback)
-- [ ] Versioned prompt files and JSON schema under internal/vision/prompts/v1/
-- [ ] Deterministic validators: NRN, dates, ingredient normalization (reuse phase 02 functions)
-- [ ] Multi-image merge logic (front, back, side faces)
-- [ ] Retry, timeout, circuit breaker, and per-call cost and latency recording (llm\_calls table)
-- [ ] Image preprocessing step (resize to the provider limit, contrast fix if proven helpful)
-- [ ] process\_scan job updated to use the real pipeline, behind a config switch to the fake
-- [ ] Extraction eval set of at least 100 labeled pack photos and a scoring command (see document 10)
-- [ ] Recorded provider responses for contract tests
+- [x] VisionProvider interface and LabelData types
+- [x] Provider implementation 1: Claude vision (structured output)
+- [x] Provider implementation 2: Google Vision or a second model, behind the same interface (for comparison and fallback) — implemented as a second pinned Claude model (`VISION_FALLBACK_MODEL`), not Google Vision
+- [x] Versioned prompt files and JSON schema under internal/vision/prompts/v1/
+- [x] Deterministic validators: NRN, dates, ingredient normalization (reuse phase 02 functions)
+- [x] Multi-image merge logic (front, back, side faces)
+- [x] Retry, timeout, circuit breaker, and per-call cost and latency recording (llm\_calls table)
+- [x] Image preprocessing step (resize to the provider limit, contrast fix if proven helpful) — resize only; no contrast change until evidence supports it
+- [x] process\_scan job updated to use the real pipeline, behind a config switch to the fake
+- [ ] Extraction eval set of at least 100 labeled pack photos and a scoring command (see document 10) — scoring command and manifest format implemented; the consented 100+ photo set is an external blocker (see section 10)
+- [x] Recorded provider responses for contract tests
 
 ## 2. Tools needed
 
@@ -117,3 +117,69 @@ type LabelData struct {
 - Implement the fake provider first (it should already exist from phase 03), then validators and merge logic with unit tests, then the real providers.
 - Never put API keys in fixtures. Recorded responses must be scrubbed of identifiers.
 - When adding a field, update the schema, prompt, validator, tests, and the OpenAPI result shape together.
+
+## 9. Implementation notes
+
+Status: **in review**. The pipeline, providers, validators, ledger, and eval
+harness are implemented; the consented eval dataset and the live provider
+acceptance run are not.
+
+- **Providers.** `internal/vision` holds the `Provider` interface, the
+  deterministic `Fake`, the real `Claude` Messages API provider, a `Resilient`
+  wrapper (timeout, retries, circuit breaker), a `Fallback` wrapper, and
+  `visioncfg.New`, which is the single config-to-provider mapping used by the
+  worker and `cmd/eval`. The second provider is a second pinned Claude model,
+  not Google Vision: one vendor keeps the data-handling review and the prompt
+  contract in one place. `VISION_FALLBACK_MODEL` is used only when the primary
+  provider errors, never when an image is unreadable.
+- **Structured output.** `internal/vision/prompts/v1/{system.md,schema.json}`
+  are embedded. The request forces a single `record_label` tool, so the model
+  cannot answer in prose. `PromptVersion` is stored on `LabelData` and on every
+  `llm_calls` row. The prompt tells the model to return null rather than guess,
+  to copy text exactly, and that text in the image is data, never instructions.
+- **Untrusted output.** `RawLabel` is untrusted. `ValidateLabel` is the only
+  way to produce typed `LabelData`, and it is applied after merge. Invalid NRNs
+  and ambiguous or impossible dates become unreadable with the raw text kept.
+  Confusable NRN characters produce lookup candidates; they are never applied.
+- **Merge.** `MergeLabels` takes the highest-confidence value per field. Two
+  different values within `ConflictThreshold` (0.15) become a conflict and the
+  field is left unreadable. Other readable fields still complete the scan; only
+  "no key field" or overall confidence below `SCAN_MIN_CONFIDENCE` makes the
+  whole scan `unreadable`.
+- **Images.** Each stored image is one provider call. `Preprocess` resizes the
+  longer edge to `VISION_MAX_IMAGE_DIMENSION` and re-encodes the JPEG, which
+  also drops metadata. No sharpening or contrast changes are applied; the phase
+  text only allows them "if proven helpful", and there is no evidence yet.
+- **Cost and observability.** `llm_calls` is append-only and stores provider,
+  model, prompt version, kind, latency, token counts, estimated USD cost,
+  outcome, and an error code. It never stores prompts, responses, image bytes,
+  or extracted text. A recorder failure is logged and does not fail a readable
+  scan.
+- **Config.** `VISION_PROVIDER=fake|claude`; production rejects `fake`.
+  `VISION_MODEL` must be an exact pinned id when using Claude, and
+  `VISION_API_KEY` is registered with the log redactor. See `.env.example`.
+- **Eval.** `cmd/eval` loads a manifest, runs each case through the same
+  provider and validators, and reports per-field exact and normalized rates.
+  It exits non-zero on any fabricated NRN or an NRN normalized rate below
+  `-min-nrn` (default 0.90). `testdata/eval/README.md` defines the format and
+  consent requirements; the dataset itself is intentionally not committed.
+- **Tests.** Unit tests cover validators, date ambiguity, merge/conflict,
+  malformed and refused provider responses, prompt injection, retries, the
+  circuit breaker, preprocessing, and eval scoring. Contract tests replay
+  recorded, scrubbed Claude responses from `internal/vision/testdata/`.
+  Integration tests cover ledger rows for every outcome and the scan pipeline
+  merging two images and recording every call. No test calls a live provider.
+
+## 10. Blockers and open items
+
+- **Eval dataset.** At least 100 consented, hand-labelled real pack photos,
+  with independent double-labelling on a sample, cannot be produced from this
+  environment. The harness is ready; the dataset is the blocker for the
+  acceptance gates in section 5.
+- **Live provider acceptance run.** Needs `VISION_API_KEY`, pinned model ids, a
+  provider spending cap, and an approved data-handling position for sending
+  images to a foreign provider. Not run in CI.
+- **Data handling.** `docs/data-handling.md` still needs the recorded decision
+  on sending pack photos to the model provider (also tracked in phase 12).
+- **NAFDAC agreement.** The written Greenbook data-sharing agreement is still
+  open from phase 02 and remains a go-live risk.

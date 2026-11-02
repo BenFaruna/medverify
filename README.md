@@ -9,13 +9,21 @@ The system never says a medicine is safe, genuine, or authentic. See
 [docs/scoring-philosophy.md](docs/scoring-philosophy.md) and the product rules in
 [the build tracker](docs/phases/MedVerify%20NG%20-%2000%20Build%20Tracker%20and%20Engineering%20Conventions.md).
 
-Current state: **phase 3 (scan pipeline skeleton), in review**. Uploads are
-validated, re-encoded to strip EXIF and GPS, stored privately, processed by a
-River job with a fake vision provider, and exposed through POST/GET /v1/scans.
-The phase 2 live-ingestion acceptance run and the written NAFDAC data-sharing
+Current state: **phase 4 (label extraction), in review**. Uploads are validated,
+re-encoded to strip EXIF and GPS, stored privately, processed by a River job,
+and exposed through POST/GET /v1/scans. Each image goes through a configurable
+vision provider; the default is a deterministic fake, and production can use a
+pinned Claude model. Model output is schema-constrained and then passed through
+deterministic validators and multi-image merge, so missing or ambiguous fields
+are reported as unreadable rather than guessed. Provider calls are recorded in
+`llm_calls` with cost and latency only.
+
+The phase 2 live-ingestion acceptance run, the consented 100+ photo extraction
+eval set, the live provider acceptance run, and the written NAFDAC data-sharing
 agreement are still open; see the
-[phase 2 notes](docs/phases/MedVerify%20NG%20-%2002%20Greenbook%20and%20Leaflet%20Ingestion.md#10-implementation-notes)
-and the [phase 3 notes](docs/phases/MedVerify%20NG%20-%2003%20Scan%20Pipeline%20Skeleton.md#9-implementation-notes).
+[phase 2 notes](docs/phases/MedVerify%20NG%20-%2002%20Greenbook%20and%20Leaflet%20Ingestion.md#10-implementation-notes),
+the [phase 3 notes](docs/phases/MedVerify%20NG%20-%2003%20Scan%20Pipeline%20Skeleton.md#9-implementation-notes),
+and the [phase 4 notes](docs/phases/MedVerify%20NG%20-%2004%20Label%20Extraction.md#9-implementation-notes).
 
 ## Quickstart
 
@@ -28,7 +36,8 @@ curl localhost:8080/healthz
 curl localhost:8080/readyz
 ```
 
-Upload a pack photo (the phase 3 pipeline uses a fake vision provider):
+Upload a pack photo (the default vision provider is a deterministic fake; set
+`VISION_PROVIDER=claude` with a key and pinned model for a real extraction):
 
 ```bash
 curl -i -X POST localhost:8080/v1/scans \
@@ -70,7 +79,7 @@ Run the binaries on the host instead of in Compose with `go run ./cmd/api` and
 cmd/api      HTTP server
 cmd/worker   River background workers
 cmd/admin    migrations, storage bootstrap, manual job enqueue, syncs, report
-cmd/eval     evaluation runner (phase 10)
+cmd/eval     extraction eval runner (extended with assistant evals in phase 10)
 internal/
   platform/  config, logging, http helpers, db, jobs, clock, auth, ratelimit
   storage/   S3-compatible object storage (SeaweedFS locally)
@@ -112,7 +121,7 @@ and gitleaks.
 | --- | --- | --- |
 | none | `go test ./...` | every commit; no network, no DB |
 | `integration` | `go test -tags=integration ./...` | every PR; real Postgres and S3 storage via testcontainers |
-| `contract` | `go test -tags=contract ./...` | every PR; recorded provider responses (added in phase 4) |
+| `contract` | `go test -tags=contract ./...` | every PR; recorded provider responses (phase 4) |
 | `eval` | `make eval` | nightly and before release (phase 10) |
 
 CI never calls a real vision or language model provider.

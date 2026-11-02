@@ -291,10 +291,13 @@ components:
             type: object
             additionalProperties: true
         extracted:
-          type: object
+          allOf:
+            - $ref: "#/components/schemas/ExtractedLabel"
           nullable: true
-          description: Null until phase 04.
-          additionalProperties: true
+          description: |
+            Validated label data. Null until phase 04 fills it and on scans
+            that failed before extraction. A missing field is unreadable, not a
+            guess. `unreadable` and `conflicts` explain what was not trusted.
         created_at:
           type: string
           format: date-time
@@ -307,9 +310,143 @@ components:
         status: completed
         verdict: null
         reasons: []
-        extracted: null
+        extracted:
+          nrn:
+            value: "01-2345"
+            confidence: 0.97
+            source: 1
+          product_name:
+            value: "Paracetamol Tablets BP 500 mg"
+            confidence: 0.96
+            source: 1
+          ingredients:
+            - name_raw: "Paracetamol"
+              name_norm: "paracetamol"
+              strength_raw: "500 mg"
+              strength: {raw: "500 mg", value: 500, unit: mg}
+              confidence: 0.95
+              source: 1
+          unreadable: []
+          conflicts: []
+          provider: claude
+          model: claude-sonnet-4-5-20250929
+          prompt_version: v1
         created_at: "2026-11-02T09:00:00Z"
         completed_at: "2026-11-02T09:00:01Z"
+    ExtractedLabel:
+      type: object
+      description: |
+        Validated extraction output. Every value may be null. The NRN is
+        normalized and format-checked; confusable-character variants are
+        offered as candidates for registry lookup, never applied.
+      properties:
+        nrn:
+          $ref: "#/components/schemas/StringField"
+        product_name:
+          $ref: "#/components/schemas/StringField"
+        manufacturer:
+          $ref: "#/components/schemas/StringField"
+        batch_no:
+          $ref: "#/components/schemas/StringField"
+        mfg_date:
+          $ref: "#/components/schemas/DateField"
+        expiry_date:
+          $ref: "#/components/schemas/DateField"
+        ingredients:
+          type: array
+          items:
+            $ref: "#/components/schemas/IngredientClaim"
+        unreadable:
+          type: array
+          description: Field names the model or validators could not trust.
+          items:
+            type: string
+        conflicts:
+          type: array
+          description: Fields where images gave different values at similar confidence.
+          items:
+            type: string
+        provider:
+          type: string
+        model:
+          type: string
+        prompt_version:
+          type: string
+          example: v1
+    StringField:
+      type: object
+      properties:
+        value:
+          type: string
+          nullable: true
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        source:
+          type: integer
+          minimum: 1
+          description: 1-based image position.
+        raw:
+          type: string
+          description: Text as printed, kept even when validation rejects it.
+        candidates:
+          type: array
+          description: NRN variants for registry lookup. Not applied automatically.
+          items:
+            type: string
+    DateField:
+      type: object
+      properties:
+        value:
+          $ref: "#/components/schemas/LabelDate"
+          nullable: true
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        source:
+          type: integer
+          minimum: 1
+        raw:
+          type: string
+    LabelDate:
+      type: object
+      required: [year, month, precision]
+      properties:
+        year:
+          type: integer
+        month:
+          type: integer
+          minimum: 1
+          maximum: 12
+        day:
+          type: integer
+          minimum: 1
+          maximum: 31
+        precision:
+          type: string
+          enum: [day, month]
+        raw:
+          type: string
+    IngredientClaim:
+      type: object
+      properties:
+        name_raw:
+          type: string
+        name_norm:
+          type: string
+        strength_raw:
+          type: string
+        strength:
+          type: object
+          additionalProperties: true
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        source:
+          type: integer
     Problem:
       type: object
       description: RFC 7807 problem details with a stable machine code.
