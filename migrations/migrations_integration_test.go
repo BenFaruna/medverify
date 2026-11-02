@@ -40,13 +40,14 @@ func TestMigrationsStatusReportsApplied(t *testing.T) {
 
 	statuses, err := migrations.Status(ctx, databaseURL)
 	require.NoError(t, err)
-	require.Len(t, statuses, 3)
+	require.Len(t, statuses, 4)
 	for _, status := range statuses {
 		assert.Equal(t, "applied", string(status.State))
 	}
 	assert.Equal(t, int64(1), statuses[0].Source.Version)
 	assert.Equal(t, int64(2), statuses[1].Source.Version)
 	assert.Equal(t, int64(3), statuses[2].Source.Version)
+	assert.Equal(t, int64(4), statuses[3].Source.Version)
 }
 
 func TestScanTablesExistAfterMigrateUp(t *testing.T) {
@@ -56,7 +57,7 @@ func TestScanTablesExistAfterMigrateUp(t *testing.T) {
 	require.NoError(t, migrations.Up(ctx, databaseURL))
 
 	for _, table := range []string{
-		"api_clients", "scans", "scan_images", "scan_results", "idempotency_keys",
+		"api_clients", "scans", "scan_images", "scan_results", "idempotency_keys", "llm_calls",
 	} {
 		assert.True(t, tableExists(t, databaseURL, table), "table %s should exist", table)
 	}

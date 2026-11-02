@@ -37,6 +37,9 @@ type Querier interface {
 	// The primary key makes the race safe: one concurrent request wins and the
 	// other receives no row, then reads the winner.
 	InsertIdempotencyKey(ctx context.Context, arg InsertIdempotencyKeyParams) (IdempotencyKey, error)
+	// Cost and latency records for provider calls. No prompt or response text is
+	// stored here.
+	InsertLLMCall(ctx context.Context, arg InsertLLMCallParams) (LlmCall, error)
 	InsertProductIngredient(ctx context.Context, arg InsertProductIngredientParams) error
 	InsertSMPCSection(ctx context.Context, arg InsertSMPCSectionParams) error
 	InsertScanImage(ctx context.Context, arg InsertScanImageParams) (ScanImage, error)

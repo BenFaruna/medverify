@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type ApiClient struct {
@@ -24,6 +25,22 @@ type IdempotencyKey struct {
 	RequestHash    string    `json:"request_hash"`
 	ScanID         uuid.UUID `json:"scan_id"`
 	CreatedAt      time.Time `json:"created_at"`
+}
+
+type LlmCall struct {
+	ID            int64          `json:"id"`
+	ScanID        pgtype.UUID    `json:"scan_id"`
+	Provider      string         `json:"provider"`
+	Model         string         `json:"model"`
+	PromptVersion string         `json:"prompt_version"`
+	Kind          string         `json:"kind"`
+	LatencyMs     int32          `json:"latency_ms"`
+	InputUnits    *int32         `json:"input_units"`
+	OutputUnits   *int32         `json:"output_units"`
+	CostUsd       pgtype.Numeric `json:"cost_usd"`
+	Outcome       string         `json:"outcome"`
+	ErrorCode     *string        `json:"error_code"`
+	CreatedAt     time.Time      `json:"created_at"`
 }
 
 type Product struct {
