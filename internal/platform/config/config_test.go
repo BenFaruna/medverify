@@ -38,6 +38,15 @@ func TestLoadFromValidEnvironment(t *testing.T) {
 	assert.False(t, cfg.Storage.UseSSL)
 	assert.Equal(t, 4, cfg.Jobs.Concurrency)
 
+	assert.Equal(t, "dev-api-key", cfg.API.Key)
+	assert.Equal(t, 4, cfg.Scan.MaxImages)
+	assert.Equal(t, int64(10<<20), cfg.Scan.MaxImageBytes)
+	assert.Equal(t, int64(45<<20), cfg.Scan.MaxRequestBytes)
+	assert.Equal(t, int64(40_000_000), cfg.Scan.MaxPixels)
+	assert.Equal(t, 5*time.Second, cfg.Scan.SyncWait)
+	assert.Equal(t, 100*time.Millisecond, cfg.Scan.PollInterval)
+	assert.Equal(t, 0.5, cfg.Scan.MinConfidence)
+
 	assert.True(t, cfg.Greenbook.Enabled)
 	assert.Equal(t, "https://greenbook.nafdac.gov.ng", cfg.Greenbook.BaseURL)
 	assert.Equal(t, 1.0, cfg.Greenbook.RequestsPerSecond)
@@ -61,6 +70,7 @@ func TestLoadFromOverridesDefaults(t *testing.T) {
 	env := append(baseEnv(),
 		"APP_ENV=production",
 		"LOG_LEVEL=debug",
+		"API_KEY=production-key",
 		"HTTP_ADDR=0.0.0.0:9090",
 		"HTTP_REQUEST_TIMEOUT=30s",
 		"HTTP_MAX_BODY_BYTES=4194304",
@@ -91,6 +101,7 @@ func TestLoadFromOverridesDefaults(t *testing.T) {
 	assert.Equal(t, int32(5), cfg.Database.MinConns)
 	assert.True(t, cfg.Storage.UseSSL)
 	assert.Equal(t, 8, cfg.Jobs.Concurrency)
+	assert.Equal(t, "production-key", cfg.API.Key)
 
 	assert.False(t, cfg.Greenbook.Enabled)
 	assert.Equal(t, "http://localhost:9001", cfg.Greenbook.BaseURL)

@@ -7,22 +7,39 @@ package dbgen
 import (
 	"context"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type Querier interface {
+	// The guarded update is the state machine: only a queued row moves to
+	// processing, so two workers cannot process the same scan.
+	ClaimScan(ctx context.Context, id uuid.UUID) (int64, error)
 	CountProductIngredients(ctx context.Context) (int64, error)
 	CountProducts(ctx context.Context) (int64, error)
 	CountProductsWithLeafletURL(ctx context.Context) (int64, error)
 	CountSMPCDocumentsByStatus(ctx context.Context) ([]CountSMPCDocumentsByStatusRow, error)
 	CountSMPCSections(ctx context.Context) (int64, error)
+	// Queries for the scan pipeline (phase 03). Hand-written SQL only; sqlc
+	// compiles it.
+	CreateScan(ctx context.Context, arg CreateScanParams) (Scan, error)
 	DeleteProductIngredients(ctx context.Context, productID int64) error
 	DeleteSMPCSections(ctx context.Context, documentID int64) error
+	// A terminal write only applies to a row this worker claimed.
+	FinishScan(ctx context.Context, arg FinishScanParams) (int64, error)
 	FinishSyncRun(ctx context.Context, arg FinishSyncRunParams) error
+	GetIdempotencyKey(ctx context.Context, arg GetIdempotencyKeyParams) (IdempotencyKey, error)
 	GetProductByNRN(ctx context.Context, nrn *string) (Product, error)
 	GetProductBySourceID(ctx context.Context, sourceID string) (Product, error)
 	GetSMPCDocument(ctx context.Context, arg GetSMPCDocumentParams) (SmpcDocument, error)
+	GetScan(ctx context.Context, id uuid.UUID) (Scan, error)
+	GetScanResult(ctx context.Context, scanID uuid.UUID) (ScanResult, error)
+	// The primary key makes the race safe: one concurrent request wins and the
+	// other receives no row, then reads the winner.
+	InsertIdempotencyKey(ctx context.Context, arg InsertIdempotencyKeyParams) (IdempotencyKey, error)
 	InsertProductIngredient(ctx context.Context, arg InsertProductIngredientParams) error
 	InsertSMPCSection(ctx context.Context, arg InsertSMPCSectionParams) error
+	InsertScanImage(ctx context.Context, arg InsertScanImageParams) (ScanImage, error)
 	LastSuccessfulSyncRun(ctx context.Context) (SyncRun, error)
 	LatestSyncRun(ctx context.Context) (SyncRun, error)
 	ListIngredientNameCounts(ctx context.Context, rowLimit int32) ([]ListIngredientNameCountsRow, error)
@@ -34,9 +51,13 @@ type Querier interface {
 	ListProductsForLeafletSync(ctx context.Context, rowLimit int32) ([]ListProductsForLeafletSyncRow, error)
 	ListRecentSyncRuns(ctx context.Context, rowLimit int32) ([]SyncRun, error)
 	ListSMPCSections(ctx context.Context, documentID int64) ([]SmpcSection, error)
+	ListScanImages(ctx context.Context, scanID uuid.UUID) ([]ScanImage, error)
 	// Used by readiness probes and by smoke tests. It keeps the sqlc pipeline
 	// exercised until phase 02 adds real tables and queries.
 	Ping(ctx context.Context) (int64, error)
+	// River retries a failed job. Moving failed back to queued is the only
+	// transition that lets the retry claim the scan again.
+	RequeueFailedScan(ctx context.Context, id uuid.UUID) (int64, error)
 	// Trigram search ranked by similarity. The pg_trgm % operator keeps the index
 	// usable; similarity() orders the results so typos and word-order changes rank
 	// below exact matches.
@@ -48,6 +69,7 @@ type Querier interface {
 	// returned when the hash is unchanged, which callers treat as a no-op.
 	UpsertProduct(ctx context.Context, arg UpsertProductParams) (UpsertProductRow, error)
 	UpsertSMPCDocument(ctx context.Context, arg UpsertSMPCDocumentParams) (SmpcDocument, error)
+	UpsertScanResult(ctx context.Context, arg UpsertScanResultParams) error
 }
 
 var _ Querier = (*Queries)(nil)

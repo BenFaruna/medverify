@@ -41,3 +41,7 @@ sql:
             go_type:
               type: "int32"
               pointer: true
+          - db_type: "uuid"
+            go_type:
+              import: "github.com/google/uuid"
+              type: "UUID"

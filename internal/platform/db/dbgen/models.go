@@ -6,7 +6,25 @@ package dbgen
 
 import (
 	"time"
+
+	"github.com/google/uuid"
 )
+
+type ApiClient struct {
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
+	KeyHash   string    `json:"key_hash"`
+	Active    bool      `json:"active"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type IdempotencyKey struct {
+	ClientKey      string    `json:"client_key"`
+	IdempotencyKey string    `json:"idempotency_key"`
+	RequestHash    string    `json:"request_hash"`
+	ScanID         uuid.UUID `json:"scan_id"`
+	CreatedAt      time.Time `json:"created_at"`
+}
 
 type Product struct {
 	ID                   int64      `json:"id"`
@@ -42,6 +60,41 @@ type ProductIngredient struct {
 	StrengthUnit  *string  `json:"strength_unit"`
 	PerUnit       *string  `json:"per_unit"`
 	StrengthRaw   *string  `json:"strength_raw"`
+}
+
+type Scan struct {
+	ID           uuid.UUID  `json:"id"`
+	ClientKey    string     `json:"client_key"`
+	Status       string     `json:"status"`
+	Language     *string    `json:"language"`
+	LocationCell *string    `json:"location_cell"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	CompletedAt  *time.Time `json:"completed_at"`
+}
+
+type ScanImage struct {
+	ID          int64     `json:"id"`
+	ScanID      uuid.UUID `json:"scan_id"`
+	Position    int16     `json:"position"`
+	StorageKey  string    `json:"storage_key"`
+	ContentType string    `json:"content_type"`
+	ByteSize    int32     `json:"byte_size"`
+	Width       int32     `json:"width"`
+	Height      int32     `json:"height"`
+	Sha256      string    `json:"sha256"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type ScanResult struct {
+	ScanID    uuid.UUID `json:"scan_id"`
+	Verdict   []byte    `json:"verdict"`
+	Reasons   []byte    `json:"reasons"`
+	Extracted []byte    `json:"extracted"`
+	Provider  *string   `json:"provider"`
+	Error     *string   `json:"error"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type SmpcDocument struct {

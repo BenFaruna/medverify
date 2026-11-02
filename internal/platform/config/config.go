@@ -47,6 +47,8 @@ type Config struct {
 	Storage   Storage
 	Jobs      Jobs
 	Greenbook Greenbook
+	API       API
+	Scan      Scan
 }
 
 // HTTP holds the HTTP server settings.
@@ -103,6 +105,23 @@ type Greenbook struct {
 	SyncInterval                  time.Duration
 	AnomalyMaxDropPercent         float64
 	AnomalyMaxParseFailurePercent float64
+}
+
+// API holds the placeholder API authentication setting. Phase 11 replaces the
+// single key with rows in api_clients.
+type API struct {
+	Key string
+}
+
+// Scan holds upload and extraction limits.
+type Scan struct {
+	MaxImages       int
+	MaxImageBytes   int64
+	MaxRequestBytes int64
+	MaxPixels       int64
+	SyncWait        time.Duration
+	PollInterval    time.Duration
+	MinConfidence   float64
 }
 
 // Problem is one invalid or missing configuration value. Values are never
@@ -198,6 +217,18 @@ func LoadFrom(environ []string) (Config, error) {
 			AnomalyMaxDropPercent:         l.percent("GREENBOOK_ANOMALY_MAX_DROP_PERCENT", 30),
 			AnomalyMaxParseFailurePercent: l.percent("GREENBOOK_ANOMALY_MAX_PARSE_FAILURE_PERCENT", 10),
 		},
+		API: API{
+			Key: l.str("API_KEY", "dev-api-key"),
+		},
+		Scan: Scan{
+			MaxImages:       l.positiveInt("SCAN_MAX_IMAGES", 4),
+			MaxImageBytes:   l.bytes("SCAN_MAX_IMAGE_BYTES", 10<<20),
+			MaxRequestBytes: l.bytes("SCAN_MAX_REQUEST_BYTES", 45<<20),
+			MaxPixels:       l.positiveInt64("SCAN_MAX_PIXELS", 40_000_000),
+			SyncWait:        l.duration("SCAN_SYNC_WAIT", 5*time.Second),
+			PollInterval:    l.duration("SCAN_POLL_INTERVAL", 100*time.Millisecond),
+			MinConfidence:   l.fraction("SCAN_MIN_CONFIDENCE", 0.5),
+		},
 	}
 
 	l.validateURL("DATABASE_URL", cfg.Database.URL)
@@ -207,6 +238,12 @@ func LoadFrom(environ []string) (Config, error) {
 	}
 	if len(cfg.Greenbook.AllowedHosts) == 0 {
 		l.add("GREENBOOK_ALLOWED_HOSTS", "must list at least one leaflet host")
+	}
+	if cfg.Env == EnvProduction && cfg.API.Key == "dev-api-key" {
+		l.add("API_KEY", "must not use the development default in production")
+	}
+	if cfg.Scan.MaxRequestBytes < cfg.Scan.MaxImageBytes*int64(cfg.Scan.MaxImages) {
+		l.add("SCAN_MAX_REQUEST_BYTES", "must be at least SCAN_MAX_IMAGE_BYTES * SCAN_MAX_IMAGES")
 	}
 
 	if len(l.problems) > 0 {
@@ -355,6 +392,23 @@ func (l *loader) percent(key string, fallback float64) float64 {
 	return parsed
 }
 
+func (l *loader) fraction(key string, fallback float64) float64 {
+	value, ok := l.raw(key)
+	if !ok {
+		return fallback
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		l.add(key, "must be a number between 0 and 1")
+		return fallback
+	}
+	if parsed < 0 || parsed > 1 {
+		l.add(key, "must be between 0 and 1")
+		return fallback
+	}
+	return parsed
+}
+
 func (l *loader) csv(key, fallback string) []string {
 	value, ok := l.raw(key)
 	if !ok {
@@ -404,6 +458,23 @@ func (l *loader) bytes(key string, fallback int64) int64 {
 	parsed, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
 		l.add(key, "must be a number of bytes")
+		return fallback
+	}
+	if parsed <= 0 {
+		l.add(key, "must be greater than zero")
+		return fallback
+	}
+	return parsed
+}
+
+func (l *loader) positiveInt64(key string, fallback int64) int64 {
+	value, ok := l.raw(key)
+	if !ok {
+		return fallback
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		l.add(key, "must be a positive integer")
 		return fallback
 	}
 	if parsed <= 0 {

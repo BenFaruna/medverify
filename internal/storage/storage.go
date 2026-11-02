@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -37,6 +38,10 @@ type Store interface {
 	EnsureBucket(ctx context.Context) error
 	// Put streams an object under key. The reader is consumed once.
 	Put(ctx context.Context, key string, r io.Reader, opts PutOptions) error
+	// Get reads an object. Callers own the returned bytes.
+	Get(ctx context.Context, key string) ([]byte, error)
+	// Delete removes an object. Deleting a missing object is not an error.
+	Delete(ctx context.Context, key string) error
 }
 
 // Options configures the S3-compatible store.
@@ -119,9 +124,35 @@ func (s *S3) Put(ctx context.Context, key string, r io.Reader, opts PutOptions) 
 	return nil
 }
 
+// Get reads an object from the configured bucket.
+func (s *S3) Get(ctx context.Context, key string) ([]byte, error) {
+	object, err := s.client.GetObject(ctx, s.bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("get object %q: %w", key, err)
+	}
+	defer func() { _ = object.Close() }()
+
+	data, err := io.ReadAll(object)
+	if err != nil {
+		return nil, fmt.Errorf("read object %q: %w", key, err)
+	}
+	return data, nil
+}
+
+// Delete removes an object. A missing object is treated as success so cleanup
+// can be retried safely.
+func (s *S3) Delete(ctx context.Context, key string) error {
+	if err := s.client.RemoveObject(ctx, s.bucket, key, minio.RemoveObjectOptions{}); err != nil {
+		return fmt.Errorf("delete object %q: %w", key, err)
+	}
+	return nil
+}
+
 // Fake is an in-memory Store for unit tests.
 type Fake struct {
-	// Err, when set, is returned by Ping and EnsureBucket.
+	mu sync.Mutex
+
+	// Err, when set, is returned by every method.
 	Err error
 	// BucketExists controls the Ping result when Err is nil.
 	BucketExists bool
@@ -133,6 +164,8 @@ type Fake struct {
 
 // Ping implements Store.
 func (f *Fake) Ping(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.Err != nil {
 		return f.Err
 	}
@@ -144,6 +177,8 @@ func (f *Fake) Ping(context.Context) error {
 
 // EnsureBucket implements Store.
 func (f *Fake) EnsureBucket(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.Err != nil {
 		return f.Err
 	}
@@ -154,17 +189,45 @@ func (f *Fake) EnsureBucket(context.Context) error {
 
 // Put implements Store.
 func (f *Fake) Put(_ context.Context, key string, r io.Reader, _ PutOptions) error {
-	if f.Err != nil {
-		return f.Err
-	}
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return err
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return f.Err
 	}
 	if f.Objects == nil {
 		f.Objects = make(map[string][]byte)
 	}
 	f.Objects[key] = data
+	return nil
+}
+
+// Get implements Store.
+func (f *Fake) Get(_ context.Context, key string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	data, ok := f.Objects[key]
+	if !ok {
+		return nil, fmt.Errorf("object %q not found", key)
+	}
+	return append([]byte(nil), data...), nil
+}
+
+// Delete implements Store.
+func (f *Fake) Delete(_ context.Context, key string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return f.Err
+	}
+	delete(f.Objects, key)
 	return nil
 }
 
