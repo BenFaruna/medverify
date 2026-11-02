@@ -49,6 +49,7 @@ type Querier interface {
 	InsertSMPCSection(ctx context.Context, arg InsertSMPCSectionParams) error
 	InsertSafetyFlag(ctx context.Context, arg InsertSafetyFlagParams) error
 	InsertScanImage(ctx context.Context, arg InsertScanImageParams) (ScanImage, error)
+	// A repeated import of the same reviewed file inserts nothing new.
 	InsertWatchlistEntry(ctx context.Context, arg InsertWatchlistEntryParams) (int64, error)
 	LastSuccessfulSyncRun(ctx context.Context) (SyncRun, error)
 	LatestSyncRun(ctx context.Context) (SyncRun, error)
@@ -88,7 +89,9 @@ type Querier interface {
 	UpsertScanResult(ctx context.Context, arg UpsertScanResultParams) error
 	// Watchlist sources and entries (phase 06). Only the admin import command
 	// writes these rows; the worker and API only read them.
-	UpsertWatchlistSource(ctx context.Context, arg UpsertWatchlistSourceParams) (WatchlistSource, error)
+	// xmax is 0 only for a freshly inserted row, so a re-import can report how
+	// many source documents it actually added.
+	UpsertWatchlistSource(ctx context.Context, arg UpsertWatchlistSourceParams) (UpsertWatchlistSourceRow, error)
 	WatchlistCounts(ctx context.Context) (WatchlistCountsRow, error)
 }
 

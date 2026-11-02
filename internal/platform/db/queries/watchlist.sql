@@ -7,9 +7,12 @@ VALUES (@issuing_body, @title, @source_url, @issued_at)
 ON CONFLICT (source_url, issued_at) DO UPDATE SET
   issuing_body = EXCLUDED.issuing_body,
   title = EXCLUDED.title
-RETURNING *;
+-- xmax is 0 only for a freshly inserted row, so a re-import can report how
+-- many source documents it actually added.
+RETURNING id, (xmax = 0) AS inserted;
 
--- name: InsertWatchlistEntry :one
+-- name: InsertWatchlistEntry :execrows
+-- A repeated import of the same reviewed file inserts nothing new.
 INSERT INTO watchlist_entries (
   source_id, kind, nrn, product_name, product_name_norm, manufacturer,
   manufacturer_norm, ingredient_norm, reason, effective_until, reviewed_by,
@@ -22,7 +25,7 @@ VALUES (
   @reason, sqlc.narg('effective_until'), @reviewed_by,
   sqlc.narg('review_due_at')
 )
-RETURNING id;
+ON CONFLICT DO NOTHING;
 
 -- name: ListWatchlistEntries :many
 SELECT

@@ -81,10 +81,12 @@ func (s *Store) Import(ctx context.Context, entries []ImportEntry) (ImportSummar
 			}
 			sourceID = source.ID
 			sourceIDs[sourceKey] = sourceID
-			summary.Sources++
+			if source.Inserted {
+				summary.Sources++
+			}
 		}
 
-		if _, err := q.InsertWatchlistEntry(ctx, dbgen.InsertWatchlistEntryParams{
+		inserted, err := q.InsertWatchlistEntry(ctx, dbgen.InsertWatchlistEntryParams{
 			SourceID:         sourceID,
 			Kind:             string(entry.Kind),
 			Nrn:              optional(entry.NRN),
@@ -97,10 +99,11 @@ func (s *Store) Import(ctx context.Context, entries []ImportEntry) (ImportSummar
 			EffectiveUntil:   optionalTime(entry.EffectiveUntil),
 			ReviewedBy:       entry.ReviewedBy,
 			ReviewDueAt:      optionalTime(entry.ReviewDueAt),
-		}); err != nil {
+		})
+		if err != nil {
 			return ImportSummary{}, fmt.Errorf("store entry %d: %w", i+1, err)
 		}
-		summary.Entries++
+		summary.Entries += int(inserted)
 	}
 
 	if err := tx.Commit(ctx); err != nil {

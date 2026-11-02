@@ -25,6 +25,7 @@ import (
 	"github.com/benfaruna/medverify/internal/platform/jobs"
 	"github.com/benfaruna/medverify/internal/platform/logging"
 	"github.com/benfaruna/medverify/internal/registry"
+	"github.com/benfaruna/medverify/internal/safety"
 	"github.com/benfaruna/medverify/internal/storage"
 	"github.com/benfaruna/medverify/migrations"
 )
@@ -42,6 +43,12 @@ commands:
   sync leaflets [--limit N]
                         download, extract, and split pending leaflets
   registry report       show ingestion counts, recent runs, and OCR needs
+  watchlist import <file.csv> [--dry-run]
+                        validate and load reviewed watchlist entries
+  watchlist list [--all] [--stale]
+                        show watchlist entries, sources, and review dates
+  watchlist deactivate <id>
+                        retire an entry without deleting its history
 `
 
 func main() {
@@ -84,6 +91,8 @@ func run(args []string) error {
 		return syncCommand(ctx, cfg, args[1:])
 	case "registry":
 		return registryCommand(ctx, cfg, args[1:])
+	case "watchlist":
+		return watchlistCommand(ctx, cfg, args[1:])
 	case "help", "-h", "--help":
 		_, _ = fmt.Fprint(os.Stdout, usage)
 		return nil
@@ -383,6 +392,180 @@ func printIngestionReport(report registry.IngestionReport) {
 			_, _ = fmt.Fprintf(w, "%s\t%d\n", ingredient.Name, ingredient.Count)
 		}
 		_ = w.Flush()
+	}
+}
+
+func watchlistCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("watchlist requires one of: import, list, deactivate")
+	}
+	switch args[0] {
+	case "import":
+		return watchlistImport(ctx, cfg, args[1:])
+	case "list":
+		return watchlistList(ctx, cfg, args[1:])
+	case "deactivate":
+		return watchlistDeactivate(ctx, cfg, args[1:])
+	default:
+		return fmt.Errorf("unknown watchlist action %q", args[0])
+	}
+}
+
+func watchlistImport(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("watchlist import requires a CSV file")
+	}
+	path := args[0]
+	dryRun := false
+	for _, arg := range args[1:] {
+		switch arg {
+		case "--dry-run":
+			dryRun = true
+		default:
+			return fmt.Errorf("unknown watchlist import option %q", arg)
+		}
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open watchlist CSV: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+
+	entries, err := safety.ParseImportCSV(file)
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(os.Stdout, "validated %d entries\n", len(entries))
+	if dryRun {
+		_, _ = fmt.Fprintln(os.Stdout, "dry run: nothing written")
+		return nil
+	}
+
+	pool, err := db.Open(cfg.Database)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	summary, err := safety.NewStore(pool).Import(ctx, entries)
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(os.Stdout, "imported %d entries from %d sources\n", summary.Entries, summary.Sources)
+	return nil
+}
+
+func watchlistList(ctx context.Context, cfg config.Config, args []string) error {
+	includeInactive := false
+	staleOnly := false
+	for _, arg := range args {
+		switch arg {
+		case "--all":
+			includeInactive = true
+		case "--stale":
+			staleOnly = true
+		default:
+			return fmt.Errorf("unknown watchlist list option %q", arg)
+		}
+	}
+
+	pool, err := db.Open(cfg.Database)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	store := safety.NewStore(pool)
+	now := time.Now().UTC()
+
+	var entries []safety.Entry
+	if staleOnly {
+		entries, err = store.Stale(ctx, now)
+	} else {
+		entries, err = store.List(ctx)
+	}
+	if err != nil {
+		return err
+	}
+
+	visible := make([]safety.Entry, 0, len(entries))
+	for _, entry := range entries {
+		if !includeInactive && !entry.Active {
+			continue
+		}
+		visible = append(visible, entry)
+	}
+	printWatchlist(visible, now)
+
+	if !staleOnly {
+		total, active, err := store.Counts(ctx)
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(os.Stdout, "\n%d entries, %d active\n", total, active)
+	}
+	return nil
+}
+
+func watchlistDeactivate(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("watchlist deactivate requires one entry ID")
+	}
+	id, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil || id <= 0 {
+		return fmt.Errorf("watchlist entry ID must be a positive integer")
+	}
+
+	pool, err := db.Open(cfg.Database)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	deactivated, err := safety.NewStore(pool).Deactivate(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !deactivated {
+		return fmt.Errorf("watchlist entry %d not found", id)
+	}
+	_, _ = fmt.Fprintf(os.Stdout, "watchlist entry %d deactivated\n", id)
+	return nil
+}
+
+func printWatchlist(entries []safety.Entry, now time.Time) {
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(w, "ID\tKIND\tACTIVE\tMATCH\tSOURCE\tISSUED\tREVIEW DUE")
+	for _, entry := range entries {
+		reviewDue := "-"
+		if entry.ReviewDueAt != nil {
+			reviewDue = entry.ReviewDueAt.Format(time.DateOnly)
+			if entry.ReviewDueAt.Before(safety.DateOnly(now)) {
+				reviewDue += " (overdue)"
+			}
+		}
+		active := "yes"
+		if !entry.Active {
+			active = "no"
+		}
+		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			entry.ID, entry.Kind, active, watchlistMatch(entry),
+			truncate(entry.Source.URL, 60), entry.Source.IssuedAt.Format(time.DateOnly), reviewDue)
+	}
+	_ = w.Flush()
+}
+
+func watchlistMatch(entry safety.Entry) string {
+	switch {
+	case entry.NRN != "":
+		return "nrn:" + entry.NRN
+	case entry.IngredientNorm != "":
+		return "ingredient:" + entry.IngredientNorm
+	case entry.Manufacturer != "":
+		return "name:" + entry.ProductName + " / " + entry.Manufacturer
+	default:
+		return "name:" + entry.ProductName
 	}
 }
 

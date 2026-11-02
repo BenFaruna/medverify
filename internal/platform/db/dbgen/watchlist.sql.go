@@ -22,7 +22,7 @@ func (q *Queries) DeactivateWatchlistEntry(ctx context.Context, id int64) (int64
 	return result.RowsAffected(), nil
 }
 
-const insertWatchlistEntry = `-- name: InsertWatchlistEntry :one
+const insertWatchlistEntry = `-- name: InsertWatchlistEntry :execrows
 INSERT INTO watchlist_entries (
   source_id, kind, nrn, product_name, product_name_norm, manufacturer,
   manufacturer_norm, ingredient_norm, reason, effective_until, reviewed_by,
@@ -35,7 +35,7 @@ VALUES (
   $9, $10, $11,
   $12
 )
-RETURNING id
+ON CONFLICT DO NOTHING
 `
 
 type InsertWatchlistEntryParams struct {
@@ -53,8 +53,9 @@ type InsertWatchlistEntryParams struct {
 	ReviewDueAt      *time.Time `json:"review_due_at"`
 }
 
+// A repeated import of the same reviewed file inserts nothing new.
 func (q *Queries) InsertWatchlistEntry(ctx context.Context, arg InsertWatchlistEntryParams) (int64, error) {
-	row := q.db.QueryRow(ctx, insertWatchlistEntry,
+	result, err := q.db.Exec(ctx, insertWatchlistEntry,
 		arg.SourceID,
 		arg.Kind,
 		arg.Nrn,
@@ -68,9 +69,10 @@ func (q *Queries) InsertWatchlistEntry(ctx context.Context, arg InsertWatchlistE
 		arg.ReviewedBy,
 		arg.ReviewDueAt,
 	)
-	var id int64
-	err := row.Scan(&id)
-	return id, err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const listLiveWatchlistEntriesByIngredients = `-- name: ListLiveWatchlistEntriesByIngredients :many
@@ -411,7 +413,7 @@ VALUES ($1, $2, $3, $4)
 ON CONFLICT (source_url, issued_at) DO UPDATE SET
   issuing_body = EXCLUDED.issuing_body,
   title = EXCLUDED.title
-RETURNING id, issuing_body, title, source_url, issued_at, created_at
+RETURNING id, (xmax = 0) AS inserted
 `
 
 type UpsertWatchlistSourceParams struct {
@@ -421,24 +423,24 @@ type UpsertWatchlistSourceParams struct {
 	IssuedAt    time.Time `json:"issued_at"`
 }
 
+type UpsertWatchlistSourceRow struct {
+	ID       int64 `json:"id"`
+	Inserted bool  `json:"inserted"`
+}
+
 // Watchlist sources and entries (phase 06). Only the admin import command
 // writes these rows; the worker and API only read them.
-func (q *Queries) UpsertWatchlistSource(ctx context.Context, arg UpsertWatchlistSourceParams) (WatchlistSource, error) {
+// xmax is 0 only for a freshly inserted row, so a re-import can report how
+// many source documents it actually added.
+func (q *Queries) UpsertWatchlistSource(ctx context.Context, arg UpsertWatchlistSourceParams) (UpsertWatchlistSourceRow, error) {
 	row := q.db.QueryRow(ctx, upsertWatchlistSource,
 		arg.IssuingBody,
 		arg.Title,
 		arg.SourceUrl,
 		arg.IssuedAt,
 	)
-	var i WatchlistSource
-	err := row.Scan(
-		&i.ID,
-		&i.IssuingBody,
-		&i.Title,
-		&i.SourceUrl,
-		&i.IssuedAt,
-		&i.CreatedAt,
-	)
+	var i UpsertWatchlistSourceRow
+	err := row.Scan(&i.ID, &i.Inserted)
 	return i, err
 }
 

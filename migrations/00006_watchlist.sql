@@ -57,6 +57,17 @@ CREATE INDEX watchlist_entries_name_trgm
   ON watchlist_entries USING gin (product_name_norm gin_trgm_ops);
 CREATE INDEX watchlist_entries_live_idx
   ON watchlist_entries (active, effective_until);
+-- One row per reviewed entry in a source document. Re-running an import must
+-- not duplicate a row, so the natural key is built from the comparison columns
+-- (which are nullable depending on the kind).
+CREATE UNIQUE INDEX watchlist_entries_source_key
+  ON watchlist_entries (
+    source_id, kind,
+    coalesce(nrn, ''),
+    coalesce(product_name_norm, ''),
+    coalesce(manufacturer_norm, ''),
+    coalesce(ingredient_norm, '')
+  );
 
 CREATE TABLE safety_flags (
   id bigserial PRIMARY KEY,
