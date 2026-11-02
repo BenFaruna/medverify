@@ -25,6 +25,7 @@ type Querier interface {
 	InsertSMPCSection(ctx context.Context, arg InsertSMPCSectionParams) error
 	LastSuccessfulSyncRun(ctx context.Context) (SyncRun, error)
 	LatestSyncRun(ctx context.Context) (SyncRun, error)
+	ListIngredientNameCounts(ctx context.Context, rowLimit int32) ([]ListIngredientNameCountsRow, error)
 	ListProductIngredients(ctx context.Context, productID int64) ([]ProductIngredient, error)
 	ListProductsByIngredient(ctx context.Context, arg ListProductsByIngredientParams) ([]Product, error)
 	// Products whose leaflet is missing, failed, or older than the product record.

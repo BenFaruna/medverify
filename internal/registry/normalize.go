@@ -223,6 +223,12 @@ func NormalizeIngredient(raw string) string {
 	return normalizeIngredient(defaultTable, raw)
 }
 
+// KnownIngredient reports whether a normalized ingredient name is in the
+// synonym table. The ingestion report uses it to show which names to add next.
+func KnownIngredient(normalized string) bool {
+	return defaultTable.known(normalized)
+}
+
 func normalizeIngredient(table *synonymTable, raw string) string {
 	name := cleanIngredient(raw)
 	if name == "" {

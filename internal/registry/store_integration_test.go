@@ -189,6 +189,50 @@ func mustProductID(t *testing.T, pool *pgxpool.Pool, sourceID string) int64 {
 	return id
 }
 
+func TestIngestionReportSummarisesRegistry(t *testing.T) {
+	_, store := integrationStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)
+
+	product := registry.Product{
+		SourceID: "report-1", NRN: "04-4444", Name: "Paracetamol Tablets",
+		Status: "Active", SmpcURL: "https://admin.greenbook.nafdac.gov.ng/r.pdf",
+		Raw: []byte(`{"product_id":"report-1"}`), FetchedAt: now,
+		Ingredients: []registry.Ingredient{
+			{NameRaw: "Paracetamol", NameNorm: "paracetamol"},
+			{NameRaw: "Unobtainium", NameNorm: "unobtainium"},
+		},
+	}
+	_, err := store.UpsertProduct(ctx, product)
+	require.NoError(t, err)
+
+	targets, err := store.ListProductsForLeafletSync(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, targets, 1)
+	_, err = store.SaveSMPCDocument(ctx, registry.SMPCDocument{
+		ProductID: targets[0].ProductID, SourceURL: targets[0].URL,
+		Status: registry.LeafletStatusScannedNeedsOCR, FetchedAt: &now,
+	})
+	require.NoError(t, err)
+
+	runID, err := store.StartSyncRun(ctx, now)
+	require.NoError(t, err)
+	require.NoError(t, store.FinishSyncRun(ctx, runID, now.Add(time.Minute), registry.SyncResult{
+		Status: "succeeded", RowsSeen: 1, RowsAdded: 1,
+	}))
+
+	report, err := store.BuildIngestionReport(ctx, 10, 100, 10)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), report.Products)
+	assert.Equal(t, int64(2), report.Ingredients)
+	assert.Equal(t, int64(1), report.ProductsWithLeaflet)
+	assert.Equal(t, int64(1), report.LeafletStatuses[registry.LeafletStatusScannedNeedsOCR])
+	require.Len(t, report.SyncRuns, 1)
+	assert.Equal(t, "succeeded", report.SyncRuns[0].Status)
+	require.Len(t, report.UnknownIngredients, 1)
+	assert.Equal(t, "unobtainium", report.UnknownIngredients[0].Name)
+}
+
 func TestLeafletStorageRoundTrip(t *testing.T) {
 	pool, store := integrationStore(t)
 	ctx := context.Background()

@@ -202,3 +202,10 @@ SELECT count(*)::bigint AS count FROM smpc_sections;
 SELECT * FROM sync_runs
 ORDER BY started_at DESC
 LIMIT @row_limit;
+
+-- name: ListIngredientNameCounts :many
+SELECT name_norm, count(*)::bigint AS count
+FROM product_ingredients
+GROUP BY name_norm
+ORDER BY count DESC, name_norm
+LIMIT @row_limit;

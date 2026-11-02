@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"syscall"
 	"text/tabwriter"
@@ -40,6 +41,7 @@ commands:
                         run a full Greenbook sync now
   sync leaflets [--limit N]
                         download, extract, and split pending leaflets
+  registry report       show ingestion counts, recent runs, and OCR needs
 `
 
 func main() {
@@ -80,6 +82,8 @@ func run(args []string) error {
 		return jobCommand(ctx, cfg, args[1:])
 	case "sync":
 		return syncCommand(ctx, cfg, args[1:])
+	case "registry":
+		return registryCommand(ctx, cfg, args[1:])
 	case "help", "-h", "--help":
 		_, _ = fmt.Fprint(os.Stdout, usage)
 		return nil
@@ -305,4 +309,75 @@ func printLeafletSummary(summary registry.LeafletSummary) {
 	_, _ = fmt.Fprintf(w, "failed\t%d\n", summary.Failed)
 	_, _ = fmt.Fprintf(w, "sections stored\t%d\n", summary.Sections)
 	_ = w.Flush()
+}
+
+func registryCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) == 0 || args[0] != "report" {
+		return fmt.Errorf("registry requires the action: report")
+	}
+
+	pool, err := db.Open(cfg.Database)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	report, err := registry.NewStore(pool).BuildIngestionReport(ctx, 10, 1000, 50)
+	if err != nil {
+		return err
+	}
+	printIngestionReport(report)
+	return nil
+}
+
+func printIngestionReport(report registry.IngestionReport) {
+	_, _ = fmt.Fprintf(os.Stdout, "products: %d\n", report.Products)
+	_, _ = fmt.Fprintf(os.Stdout, "ingredients: %d\n", report.Ingredients)
+	_, _ = fmt.Fprintf(os.Stdout, "products with leaflet URL: %d\n", report.ProductsWithLeaflet)
+	_, _ = fmt.Fprintf(os.Stdout, "leaflet sections: %d\n", report.Sections)
+
+	statuses := make([]string, 0, len(report.LeafletStatuses))
+	for status := range report.LeafletStatuses {
+		statuses = append(statuses, status)
+	}
+	sort.Strings(statuses)
+	if len(statuses) > 0 {
+		_, _ = fmt.Fprintln(os.Stdout, "\nleaflet documents:")
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		_, _ = fmt.Fprintln(w, "STATUS\tCOUNT")
+		for _, status := range statuses {
+			_, _ = fmt.Fprintf(w, "%s\t%d\n", status, report.LeafletStatuses[status])
+		}
+		_ = w.Flush()
+	}
+
+	if len(report.SyncRuns) > 0 {
+		_, _ = fmt.Fprintln(os.Stdout, "\nrecent sync runs:")
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		_, _ = fmt.Fprintln(w, "ID\tSTARTED\tSTATUS\tSEEN\tADDED\tCHANGED\tFAILED\tERROR")
+		for _, run := range report.SyncRuns {
+			_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%d\t%d\t%d\t%d\t%s\n",
+				run.ID, run.StartedAt.Format(time.RFC3339), run.Status,
+				run.RowsSeen, run.RowsAdded, run.RowsChanged, run.RowsFailed, truncate(run.Error, 80))
+		}
+		_ = w.Flush()
+	}
+
+	if len(report.UnknownIngredients) > 0 {
+		_, _ = fmt.Fprintf(os.Stdout, "\nunknown ingredient names (top %d of %d scanned):\n",
+			len(report.UnknownIngredients), report.IngredientNamesSeen)
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		_, _ = fmt.Fprintln(w, "NAME\tPRODUCTS")
+		for _, ingredient := range report.UnknownIngredients {
+			_, _ = fmt.Fprintf(w, "%s\t%d\n", ingredient.Name, ingredient.Count)
+		}
+		_ = w.Flush()
+	}
+}
+
+func truncate(value string, limit int) string {
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit] + "..."
 }

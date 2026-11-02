@@ -344,6 +344,39 @@ func (q *Queries) LatestSyncRun(ctx context.Context) (SyncRun, error) {
 	return i, err
 }
 
+const listIngredientNameCounts = `-- name: ListIngredientNameCounts :many
+SELECT name_norm, count(*)::bigint AS count
+FROM product_ingredients
+GROUP BY name_norm
+ORDER BY count DESC, name_norm
+LIMIT $1
+`
+
+type ListIngredientNameCountsRow struct {
+	NameNorm string `json:"name_norm"`
+	Count    int64  `json:"count"`
+}
+
+func (q *Queries) ListIngredientNameCounts(ctx context.Context, rowLimit int32) ([]ListIngredientNameCountsRow, error) {
+	rows, err := q.db.Query(ctx, listIngredientNameCounts, rowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIngredientNameCountsRow{}
+	for rows.Next() {
+		var i ListIngredientNameCountsRow
+		if err := rows.Scan(&i.NameNorm, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listProductIngredients = `-- name: ListProductIngredients :many
 SELECT id, product_id, name_raw, name_norm, strength_value, strength_unit, per_unit, strength_raw FROM product_ingredients
 WHERE product_id = $1
