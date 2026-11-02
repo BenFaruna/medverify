@@ -5,6 +5,9 @@ import "time"
 // Product is one Greenbook product after parsing and normalization. The raw
 // payload is kept on every row so nothing published by the source is lost.
 type Product struct {
+	// ID is the local database key. It is not part of the Greenbook payload and
+	// is never exposed through an API.
+	ID                   int64      `json:"-"`
 	SourceID             string     `json:"source_id"`
 	NRN                  string     `json:"nrn"`
 	Name                 string     `json:"name"`

@@ -132,7 +132,7 @@ func (q *Queries) GetScan(ctx context.Context, id uuid.UUID) (Scan, error) {
 }
 
 const getScanResult = `-- name: GetScanResult :one
-SELECT scan_id, verdict, reasons, extracted, provider, error, created_at, updated_at FROM scan_results WHERE scan_id = $1
+SELECT scan_id, verdict, reasons, extracted, provider, error, created_at, updated_at, features FROM scan_results WHERE scan_id = $1
 `
 
 func (q *Queries) GetScanResult(ctx context.Context, scanID uuid.UUID) (ScanResult, error) {
@@ -147,6 +147,7 @@ func (q *Queries) GetScanResult(ctx context.Context, scanID uuid.UUID) (ScanResu
 		&i.Error,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Features,
 	)
 	return i, err
 }
@@ -285,15 +286,16 @@ func (q *Queries) RequeueFailedScan(ctx context.Context, id uuid.UUID) (int64, e
 }
 
 const upsertScanResult = `-- name: UpsertScanResult :exec
-INSERT INTO scan_results (scan_id, verdict, reasons, extracted, provider, error)
+INSERT INTO scan_results (scan_id, verdict, reasons, extracted, features, provider, error)
 VALUES (
   $1, $2, $3, $4,
-  $5, $6
+  $5, $6, $7
 )
 ON CONFLICT (scan_id) DO UPDATE SET
   verdict = EXCLUDED.verdict,
   reasons = EXCLUDED.reasons,
   extracted = EXCLUDED.extracted,
+  features = EXCLUDED.features,
   provider = EXCLUDED.provider,
   error = EXCLUDED.error,
   updated_at = now()
@@ -304,6 +306,7 @@ type UpsertScanResultParams struct {
 	Verdict   []byte    `json:"verdict"`
 	Reasons   []byte    `json:"reasons"`
 	Extracted []byte    `json:"extracted"`
+	Features  []byte    `json:"features"`
 	Provider  *string   `json:"provider"`
 	Error     *string   `json:"error"`
 }
@@ -314,6 +317,7 @@ func (q *Queries) UpsertScanResult(ctx context.Context, arg UpsertScanResultPara
 		arg.Verdict,
 		arg.Reasons,
 		arg.Extracted,
+		arg.Features,
 		arg.Provider,
 		arg.Error,
 	)

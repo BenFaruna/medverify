@@ -21,6 +21,7 @@ import (
 	"github.com/benfaruna/medverify/internal/registry"
 	"github.com/benfaruna/medverify/internal/scan"
 	"github.com/benfaruna/medverify/internal/storage"
+	"github.com/benfaruna/medverify/internal/verify"
 	"github.com/benfaruna/medverify/internal/vision/visioncfg"
 )
 
@@ -81,11 +82,24 @@ func run() error {
 		return err
 	}
 
+	verifyConfig, err := verify.LoadConfig(cfg.Verify.ConfigFile)
+	if err != nil {
+		return err
+	}
+	matcher, err := verify.NewMatcher(verify.Options{
+		Catalog: registry.NewStore(pool),
+		Config:  verifyConfig,
+	})
+	if err != nil {
+		return err
+	}
+
 	scanService, err := scan.NewService(scan.ServiceOptions{
 		Store:     scan.NewStore(pool),
 		Objects:   objects,
 		Provider:  provider,
 		Recorder:  llm.NewRecorder(pool),
+		Matcher:   matcher,
 		Logger:    logger,
 		MaxImages: cfg.Scan.MaxImages,
 		Limits: scan.ImageLimits{
@@ -115,6 +129,7 @@ func run() error {
 		slog.Duration("greenbook_interval", cfg.Greenbook.SyncInterval),
 		slog.String("vision_provider", cfg.Vision.Provider),
 		slog.String("vision_model", cfg.Vision.Model),
+		slog.String("verify_config_version", verifyConfig.Version),
 	)
 
 	<-ctx.Done()

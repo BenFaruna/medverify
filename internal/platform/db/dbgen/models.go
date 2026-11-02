@@ -112,6 +112,7 @@ type ScanResult struct {
 	Error     *string   `json:"error"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	Features  []byte    `json:"features"`
 }
 
 type SmpcDocument struct {

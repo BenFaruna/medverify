@@ -50,6 +50,7 @@ type Config struct {
 	API       API
 	Scan      Scan
 	Vision    Vision
+	Verify    Verify
 }
 
 // HTTP holds the HTTP server settings.
@@ -131,6 +132,13 @@ type Vision struct {
 	MaxImageDimension       int
 	InputPricePerMToken     float64
 	OutputPricePerMToken    float64
+}
+
+// Verify holds registry-verification settings. Matching thresholds live in a
+// versioned YAML file, not in environment variables, so the file's version can
+// be stored with every result. ConfigFile may point at an override.
+type Verify struct {
+	ConfigFile string
 }
 
 // Scan holds upload and extraction limits.
@@ -248,6 +256,9 @@ func LoadFrom(environ []string) (Config, error) {
 			SyncWait:        l.duration("SCAN_SYNC_WAIT", 5*time.Second),
 			PollInterval:    l.duration("SCAN_POLL_INTERVAL", 100*time.Millisecond),
 			MinConfidence:   l.fraction("SCAN_MIN_CONFIDENCE", 0.5),
+		},
+		Verify: Verify{
+			ConfigFile: l.str("VERIFY_CONFIG_FILE", ""),
 		},
 		Vision: Vision{
 			Provider:                l.oneOf("VISION_PROVIDER", "fake", "fake", "claude"),

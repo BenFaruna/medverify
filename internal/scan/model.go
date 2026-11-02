@@ -79,12 +79,13 @@ type Image struct {
 	CreatedAt   time.Time
 }
 
-// Result is the placeholder result row. Verdict stays nil until phase 07 and
-// Extracted stays nil until phase 04.
+// Result is the stored result row. Verdict stays nil until phase 07; Extracted
+// carries validated label data and Features carries registry verification.
 type Result struct {
 	Verdict   json.RawMessage
 	Reasons   json.RawMessage
 	Extracted json.RawMessage
+	Features  json.RawMessage
 	Provider  string
 	Error     string
 }
@@ -110,6 +111,7 @@ type View struct {
 	Verdict     json.RawMessage `json:"verdict"`
 	Reasons     json.RawMessage `json:"reasons"`
 	Extracted   json.RawMessage `json:"extracted"`
+	Features    json.RawMessage `json:"features"`
 	CreatedAt   time.Time       `json:"created_at"`
 	CompletedAt *time.Time      `json:"completed_at"`
 }
@@ -123,6 +125,7 @@ func (s Scan) View() View {
 		Verdict:     nil,
 		Reasons:     json.RawMessage("[]"),
 		Extracted:   nil,
+		Features:    nil,
 		CreatedAt:   s.CreatedAt,
 		CompletedAt: s.CompletedAt,
 	}
@@ -137,6 +140,9 @@ func (s Scan) View() View {
 	}
 	if len(s.Result.Extracted) > 0 {
 		view.Extracted = s.Result.Extracted
+	}
+	if len(s.Result.Features) > 0 {
+		view.Features = s.Result.Features
 	}
 	return view
 }

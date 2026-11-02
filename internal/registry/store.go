@@ -146,6 +146,33 @@ func (s *Store) PreviousSyncRows(ctx context.Context) (int, bool, error) {
 	return int(run.RowsSeen), true, nil
 }
 
+// CountProducts reports how many products are in the local dataset. A zero
+// count means verification cannot claim anything about a pack that was not
+// found; the match result carries the count so callers can say so.
+func (s *Store) CountProducts(ctx context.Context) (int, error) {
+	count, err := s.queries.CountProducts(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("count products: %w", err)
+	}
+	return int(count), nil
+}
+
+// LatestSuccessfulSync reports when the dataset was last fully refreshed. The
+// bool is false when no successful sync exists yet.
+func (s *Store) LatestSuccessfulSync(ctx context.Context) (time.Time, bool, error) {
+	run, err := s.queries.LastSuccessfulSyncRun(ctx)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("load last successful sync run: %w", err)
+	}
+	if run.FinishedAt != nil {
+		return *run.FinishedAt, true, nil
+	}
+	return run.StartedAt, true, nil
+}
+
 func optional(value string) *string {
 	if value == "" {
 		return nil

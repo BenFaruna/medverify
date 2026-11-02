@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/benfaruna/medverify/internal/storage"
+	"github.com/benfaruna/medverify/internal/verify"
 	"github.com/benfaruna/medverify/internal/vision"
 )
 
@@ -27,12 +28,19 @@ type Enqueuer interface {
 	EnqueueScan(ctx context.Context, scanID string) error
 }
 
+// RegistryMatcher verifies extracted label data against the local registry.
+// It is an interface so scan tests never need a database.
+type RegistryMatcher interface {
+	Match(ctx context.Context, label vision.LabelData) (verify.MatchResult, error)
+}
+
 // ServiceOptions configures the scan pipeline.
 type ServiceOptions struct {
 	Store             *Store
 	Objects           storage.Store
 	Provider          vision.Provider
 	Recorder          vision.Recorder
+	Matcher           RegistryMatcher
 	Enqueuer          Enqueuer
 	Logger            *slog.Logger
 	MaxImages         int
@@ -50,6 +58,7 @@ type Service struct {
 	objects           storage.Store
 	provider          vision.Provider
 	recorder          vision.Recorder
+	matcher           RegistryMatcher
 	enqueuer          Enqueuer
 	logger            *slog.Logger
 	maxImages         int
@@ -92,6 +101,7 @@ func NewService(opts ServiceOptions) (*Service, error) {
 		objects:           opts.Objects,
 		provider:          opts.Provider,
 		recorder:          opts.Recorder,
+		matcher:           opts.Matcher,
 		enqueuer:          opts.Enqueuer,
 		logger:            logger,
 		maxImages:         opts.MaxImages,
@@ -353,8 +363,23 @@ func (s *Service) Process(ctx context.Context, rawID string) error {
 		return nil
 	}
 
+	features := json.RawMessage("{}")
+	if s.matcher != nil {
+		match, err := s.matcher.Match(ctx, label)
+		if err != nil {
+			s.finishFailed(ctx, id, fmt.Errorf("verify label: %w", err))
+			return fmt.Errorf("verify scan %s: %w", id, err)
+		}
+		features, err = json.Marshal(match)
+		if err != nil {
+			s.finishFailed(ctx, id, fmt.Errorf("encode match result: %w", err))
+			return fmt.Errorf("encode match result for scan %s: %w", id, err)
+		}
+	}
+
 	s.finish(ctx, id, StatusCompleted, Result{
 		Extracted: extracted,
+		Features:  features,
 		Provider:  providerName,
 		Reasons:   []byte("[]"),
 	})

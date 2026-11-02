@@ -117,6 +117,7 @@ func (s *Store) Ingredients(ctx context.Context, productID int64) ([]Ingredient,
 
 func productFromRow(row dbgen.Product) Product {
 	return Product{
+		ID:                   row.ID,
 		SourceID:             row.SourceID,
 		NRN:                  deref(row.Nrn),
 		Name:                 row.Name,

@@ -298,6 +298,15 @@ components:
             Validated label data. Null until phase 04 fills it and on scans
             that failed before extraction. A missing field is unreadable, not a
             guess. `unreadable` and `conflicts` explain what was not trusted.
+        features:
+          allOf:
+            - $ref: "#/components/schemas/RegistryVerification"
+          nullable: true
+          description: |
+            Registry comparison for the extracted label. Null before phase 05
+            ran or when the scan has no result. `dataset` records how much data
+            the answer was based on, so `not_found_in_dataset` is never read as
+            proof that a pack is fake.
         created_at:
           type: string
           format: date-time
@@ -310,6 +319,24 @@ components:
         status: completed
         verdict: null
         reasons: []
+        features:
+          outcome: matched_consistent
+          product:
+            source_id: "8875"
+            nrn: "04-0858"
+            name: 10% Dextrose (500/1000 mL)
+            status: Active
+            score: 1
+          fields:
+            nrn: {outcome: agree, label: "04-0858", registry: "04-0858", reasons: [nrn_exact_match]}
+            name: {outcome: agree, reasons: [name_match]}
+          registry_status: Active
+          notes:
+            - {code: nrn_exact_match, field: nrn}
+          dataset:
+            config_version: v1
+            products: 198
+            last_successful_sync: "2026-11-01T12:00:00Z"
         extracted:
           nrn:
             value: "01-2345"
@@ -428,6 +455,121 @@ components:
           type: string
           enum: [day, month]
         raw:
+          type: string
+    RegistryVerification:
+      type: object
+      required: [outcome, fields, dataset]
+      description: |
+        Explainable registry comparison. No outcome is a safety or authenticity
+        claim; `matched_consistent` only means the printed fields agreed with
+        the local record.
+      properties:
+        outcome:
+          type: string
+          enum:
+            - matched_consistent
+            - matched_with_mismatch
+            - candidate_only
+            - ambiguous
+            - not_found_in_dataset
+            - unreadable_input
+        product:
+          $ref: "#/components/schemas/RegistryProductRef"
+          nullable: true
+          description: Present only for the two matched outcomes.
+        candidates:
+          type: array
+          description: |
+            Up to five plausible products for `candidate_only` and `ambiguous`.
+            Never choose one on the user's behalf.
+          items:
+            $ref: "#/components/schemas/RegistryProductRef"
+        fields:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/FieldComparison"
+        registry_status:
+          type: string
+          description: Status as stored, for example Active, Inactive, Withdrawn.
+        notes:
+          type: array
+          items:
+            $ref: "#/components/schemas/MatchNote"
+        dataset:
+          type: object
+          required: [config_version, products]
+          properties:
+            config_version:
+              type: string
+              description: Version of the threshold file used for this result.
+            products:
+              type: integer
+              description: Products in the local dataset when the match ran.
+            last_successful_sync:
+              type: string
+              format: date-time
+              nullable: true
+              description: Null when the dataset has never been synced.
+    FieldComparison:
+      type: object
+      required: [outcome]
+      properties:
+        outcome:
+          type: string
+          enum: [agree, disagree, unknown]
+          description: |
+            `unknown` means the printed field could not be read or compared. It
+            is never counted as a disagreement.
+        label:
+          type: string
+        registry:
+          type: string
+        reasons:
+          type: array
+          description: Stable reason codes; the UI translates them.
+          items:
+            type: string
+    RegistryProductRef:
+      type: object
+      required: [source_id, name, status, score]
+      properties:
+        source_id:
+          type: string
+        nrn:
+          type: string
+        name:
+          type: string
+        manufacturer:
+          type: string
+        applicant:
+          type: string
+        status:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        ingredients:
+          type: array
+          items:
+            $ref: "#/components/schemas/IngredientClaim"
+        score:
+          type: number
+          minimum: 0
+          maximum: 1
+        variant_match:
+          type: boolean
+          description: True when only a confusable NRN variant matched.
+    MatchNote:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          description: Stable reason code, for example strength_mismatch.
+        field:
+          type: string
+        detail:
           type: string
     IngredientClaim:
       type: object

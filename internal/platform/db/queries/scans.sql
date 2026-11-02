@@ -41,15 +41,16 @@ SET status = @status,
 WHERE id = @id AND status = 'processing';
 
 -- name: UpsertScanResult :exec
-INSERT INTO scan_results (scan_id, verdict, reasons, extracted, provider, error)
+INSERT INTO scan_results (scan_id, verdict, reasons, extracted, features, provider, error)
 VALUES (
   @scan_id, sqlc.narg('verdict'), @reasons, sqlc.narg('extracted'),
-  sqlc.narg('provider'), sqlc.narg('error')
+  @features, sqlc.narg('provider'), sqlc.narg('error')
 )
 ON CONFLICT (scan_id) DO UPDATE SET
   verdict = EXCLUDED.verdict,
   reasons = EXCLUDED.reasons,
   extracted = EXCLUDED.extracted,
+  features = EXCLUDED.features,
   provider = EXCLUDED.provider,
   error = EXCLUDED.error,
   updated_at = now();

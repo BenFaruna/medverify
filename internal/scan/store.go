@@ -184,11 +184,16 @@ func (s *Store) FinishScan(ctx context.Context, id uuid.UUID, status Status, res
 	if len(reasons) == 0 {
 		reasons = json.RawMessage("[]")
 	}
+	features := result.Features
+	if len(features) == 0 {
+		features = json.RawMessage("{}")
+	}
 	if err := q.UpsertScanResult(ctx, dbgen.UpsertScanResultParams{
 		ScanID:    id,
 		Verdict:   result.Verdict,
 		Reasons:   reasons,
 		Extracted: result.Extracted,
+		Features:  features,
 		Provider:  optional(result.Provider),
 		Error:     optional(result.Error),
 	}); err != nil {
@@ -259,6 +264,7 @@ func resultFromRow(row dbgen.ScanResult) Result {
 		Verdict:   row.Verdict,
 		Reasons:   row.Reasons,
 		Extracted: row.Extracted,
+		Features:  row.Features,
 	}
 	if row.Provider != nil {
 		result.Provider = *row.Provider
