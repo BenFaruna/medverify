@@ -280,16 +280,22 @@ components:
             `unreadable` means the images could not be read confidently; ask
             for a better photo. It never means the medicine is fake.
         verdict:
-          type: object
+          allOf:
+            - $ref: "#/components/schemas/Verdict"
           nullable: true
-          description: Null until phase 07. Never a safety or authenticity claim.
-          additionalProperties: true
+          description: |
+            Deterministic verdict from phase 07. Null until the scan reaches a
+            terminal state or when the worker has no rules file. It never says
+            a medicine is safe, genuine, or authentic, and it never says one is
+            counterfeit.
         reasons:
           type: array
-          description: Empty until phase 07.
+          description: |
+            Reviewed, translatable explanations of the verdict, ordered by
+            importance. Empty when there is no verdict. Display `message`, not
+            `code`.
           items:
-            type: object
-            additionalProperties: true
+            $ref: "#/components/schemas/VerdictReason"
         extracted:
           allOf:
             - $ref: "#/components/schemas/ExtractedLabel"
@@ -325,7 +331,14 @@ components:
       example:
         id: 0f9d8c2e-6a1f-4c69-9f4d-0f1f6b2c9a11
         status: completed
-        verdict: null
+        verdict:
+          value: consistent_with_records
+          score: 12
+          confidence: high
+          rules_version: verdict-v1
+          reasons:
+            - {code: registry_product_found, message: Report matches a registered product.}
+            - {code: fields_agree, field: nrn, message: The NRN printed on the pack matches the record.}
         reasons: []
         flags: []
         features:
@@ -369,6 +382,53 @@ components:
           prompt_version: v1
         created_at: "2026-11-02T09:00:00Z"
         completed_at: "2026-11-02T09:00:01Z"
+    Verdict:
+      type: object
+      required: [value, score, confidence, rules_version, reasons]
+      properties:
+        value:
+          type: string
+          enum: [consistent_with_records, mismatch_found, not_found_in_records, flagged, needs_review, unreadable]
+          description: |
+            Closed set. `not_found_in_records` and `mismatch_found` describe
+            our reference data, not the physical pack. `unreadable` asks for a
+            better photo; it is not a judgement of the medicine.
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: |
+            Internal concern ranking used for sorting and review queues. It is
+            never a probability and must not be shown as a percentage.
+        confidence:
+          type: string
+          enum: [low, medium, high]
+        rules_version:
+          type: string
+          description: Version of the rules file that produced this verdict.
+        reasons:
+          type: array
+          items:
+            $ref: "#/components/schemas/VerdictReason"
+    VerdictReason:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Stable machine key. Clients must not parse or display it.
+          example: registry_product_found
+        field:
+          type: string
+          description: Label field the reason is about, when it is about one.
+        message:
+          type: string
+          description: Reviewed wording from the reason catalog.
+        params:
+          type: object
+          additionalProperties:
+            type: string
+          description: Placeholder values used by the reviewed wording.
     ExtractedLabel:
       type: object
       description: |

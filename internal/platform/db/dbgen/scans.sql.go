@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const claimScan = `-- name: ClaimScan :execrows
@@ -132,7 +133,7 @@ func (q *Queries) GetScan(ctx context.Context, id uuid.UUID) (Scan, error) {
 }
 
 const getScanResult = `-- name: GetScanResult :one
-SELECT scan_id, verdict, reasons, extracted, provider, error, created_at, updated_at, features FROM scan_results WHERE scan_id = $1
+SELECT scan_id, reasons, extracted, provider, error, created_at, updated_at, features, verdict_code, verdict_score, verdict_confidence, verdict_rules_version, signals FROM scan_results WHERE scan_id = $1
 `
 
 func (q *Queries) GetScanResult(ctx context.Context, scanID uuid.UUID) (ScanResult, error) {
@@ -140,7 +141,6 @@ func (q *Queries) GetScanResult(ctx context.Context, scanID uuid.UUID) (ScanResu
 	var i ScanResult
 	err := row.Scan(
 		&i.ScanID,
-		&i.Verdict,
 		&i.Reasons,
 		&i.Extracted,
 		&i.Provider,
@@ -148,6 +148,11 @@ func (q *Queries) GetScanResult(ctx context.Context, scanID uuid.UUID) (ScanResu
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Features,
+		&i.VerdictCode,
+		&i.VerdictScore,
+		&i.VerdictConfidence,
+		&i.VerdictRulesVersion,
+		&i.Signals,
 	)
 	return i, err
 }
@@ -269,6 +274,56 @@ func (q *Queries) ListScanImages(ctx context.Context, scanID uuid.UUID) ([]ScanI
 	return items, nil
 }
 
+const listScoredScanResults = `-- name: ListScoredScanResults :many
+SELECT scan_id, verdict_code, verdict_score, verdict_confidence,
+       verdict_rules_version, reasons, signals, created_at
+FROM scan_results
+WHERE verdict_code IS NOT NULL
+ORDER BY created_at DESC
+LIMIT $1
+`
+
+type ListScoredScanResultsRow struct {
+	ScanID              uuid.UUID   `json:"scan_id"`
+	VerdictCode         *string     `json:"verdict_code"`
+	VerdictScore        pgtype.Int2 `json:"verdict_score"`
+	VerdictConfidence   *string     `json:"verdict_confidence"`
+	VerdictRulesVersion *string     `json:"verdict_rules_version"`
+	Reasons             []byte      `json:"reasons"`
+	Signals             []byte      `json:"signals"`
+	CreatedAt           time.Time   `json:"created_at"`
+}
+
+// Replay reads only stored output: no images and no clock.
+func (q *Queries) ListScoredScanResults(ctx context.Context, rowLimit int32) ([]ListScoredScanResultsRow, error) {
+	rows, err := q.db.Query(ctx, listScoredScanResults, rowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListScoredScanResultsRow{}
+	for rows.Next() {
+		var i ListScoredScanResultsRow
+		if err := rows.Scan(
+			&i.ScanID,
+			&i.VerdictCode,
+			&i.VerdictScore,
+			&i.VerdictConfidence,
+			&i.VerdictRulesVersion,
+			&i.Reasons,
+			&i.Signals,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const requeueFailedScan = `-- name: RequeueFailedScan :execrows
 UPDATE scans
 SET status = 'queued', updated_at = now(), completed_at = NULL
@@ -286,13 +341,22 @@ func (q *Queries) RequeueFailedScan(ctx context.Context, id uuid.UUID) (int64, e
 }
 
 const upsertScanResult = `-- name: UpsertScanResult :exec
-INSERT INTO scan_results (scan_id, verdict, reasons, extracted, features, provider, error)
+INSERT INTO scan_results (
+  scan_id, verdict_code, verdict_score, verdict_confidence, verdict_rules_version,
+  signals, reasons, extracted, features, provider, error
+)
 VALUES (
-  $1, $2, $3, $4,
-  $5, $6, $7
+  $1, $2, $3,
+  $4, $5,
+  $6, $7, $8,
+  $9, $10, $11
 )
 ON CONFLICT (scan_id) DO UPDATE SET
-  verdict = EXCLUDED.verdict,
+  verdict_code = EXCLUDED.verdict_code,
+  verdict_score = EXCLUDED.verdict_score,
+  verdict_confidence = EXCLUDED.verdict_confidence,
+  verdict_rules_version = EXCLUDED.verdict_rules_version,
+  signals = EXCLUDED.signals,
   reasons = EXCLUDED.reasons,
   extracted = EXCLUDED.extracted,
   features = EXCLUDED.features,
@@ -302,19 +366,27 @@ ON CONFLICT (scan_id) DO UPDATE SET
 `
 
 type UpsertScanResultParams struct {
-	ScanID    uuid.UUID `json:"scan_id"`
-	Verdict   []byte    `json:"verdict"`
-	Reasons   []byte    `json:"reasons"`
-	Extracted []byte    `json:"extracted"`
-	Features  []byte    `json:"features"`
-	Provider  *string   `json:"provider"`
-	Error     *string   `json:"error"`
+	ScanID              uuid.UUID   `json:"scan_id"`
+	VerdictCode         *string     `json:"verdict_code"`
+	VerdictScore        pgtype.Int2 `json:"verdict_score"`
+	VerdictConfidence   *string     `json:"verdict_confidence"`
+	VerdictRulesVersion *string     `json:"verdict_rules_version"`
+	Signals             []byte      `json:"signals"`
+	Reasons             []byte      `json:"reasons"`
+	Extracted           []byte      `json:"extracted"`
+	Features            []byte      `json:"features"`
+	Provider            *string     `json:"provider"`
+	Error               *string     `json:"error"`
 }
 
 func (q *Queries) UpsertScanResult(ctx context.Context, arg UpsertScanResultParams) error {
 	_, err := q.db.Exec(ctx, upsertScanResult,
 		arg.ScanID,
-		arg.Verdict,
+		arg.VerdictCode,
+		arg.VerdictScore,
+		arg.VerdictConfidence,
+		arg.VerdictRulesVersion,
+		arg.Signals,
 		arg.Reasons,
 		arg.Extracted,
 		arg.Features,

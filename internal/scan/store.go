@@ -14,6 +14,7 @@ import (
 
 	"github.com/benfaruna/medverify/internal/platform/db/dbgen"
 	"github.com/benfaruna/medverify/internal/safety"
+	"github.com/benfaruna/medverify/internal/verdict"
 )
 
 // ErrScanNotFound is returned when a scan ID does not exist.
@@ -132,7 +133,10 @@ func (s *Store) GetScan(ctx context.Context, id uuid.UUID) (Scan, error) {
 	case err != nil:
 		return Scan{}, fmt.Errorf("load scan result %s: %w", id, err)
 	default:
-		result := resultFromRow(resultRow)
+		result, err := resultFromRow(resultRow)
+		if err != nil {
+			return Scan{}, fmt.Errorf("decode scan result %s: %w", id, err)
+		}
 		scan.Result = &result
 	}
 
@@ -214,15 +218,34 @@ func (s *Store) FinishScan(ctx context.Context, id uuid.UUID, status Status, res
 	if len(features) == 0 {
 		features = json.RawMessage("{}")
 	}
-	if err := q.UpsertScanResult(ctx, dbgen.UpsertScanResultParams{
+
+	params := dbgen.UpsertScanResultParams{
 		ScanID:    id,
-		Verdict:   result.Verdict,
 		Reasons:   reasons,
 		Extracted: result.Extracted,
 		Features:  features,
 		Provider:  optional(result.Provider),
 		Error:     optional(result.Error),
-	}); err != nil {
+	}
+	if result.Verdict != nil {
+		if len(result.Signals) == 0 {
+			return false, fmt.Errorf("store result for scan %s: verdict has no signals", id)
+		}
+		encodedReasons, err := json.Marshal(result.Verdict.Reasons)
+		if err != nil {
+			return false, fmt.Errorf("encode verdict reasons for scan %s: %w", id, err)
+		}
+		code := string(result.Verdict.Verdict)
+		confidence := string(result.Verdict.Confidence)
+		version := result.Verdict.RulesVersion
+		params.VerdictCode = &code
+		params.VerdictConfidence = &confidence
+		params.VerdictRulesVersion = &version
+		params.VerdictScore = pgtype.Int2{Int16: int16(result.Verdict.Score), Valid: true}
+		params.Signals = result.Signals
+		params.Reasons = encodedReasons
+	}
+	if err := q.UpsertScanResult(ctx, params); err != nil {
 		return false, fmt.Errorf("store result for scan %s: %w", id, err)
 	}
 
@@ -316,10 +339,10 @@ func imageFromRow(row dbgen.ScanImage) Image {
 	}
 }
 
-func resultFromRow(row dbgen.ScanResult) Result {
+func resultFromRow(row dbgen.ScanResult) (Result, error) {
 	result := Result{
-		Verdict:   row.Verdict,
 		Reasons:   row.Reasons,
+		Signals:   row.Signals,
 		Extracted: row.Extracted,
 		Features:  row.Features,
 	}
@@ -329,7 +352,30 @@ func resultFromRow(row dbgen.ScanResult) Result {
 	if row.Error != nil {
 		result.Error = *row.Error
 	}
-	return result
+	if row.VerdictCode != nil {
+		value := verdict.Result{
+			Verdict:      verdict.Verdict(*row.VerdictCode),
+			Score:        int(row.VerdictScore.Int16),
+			RulesVersion: valueOrEmpty(row.VerdictRulesVersion),
+		}
+		if row.VerdictConfidence != nil {
+			value.Confidence = verdict.Confidence(*row.VerdictConfidence)
+		}
+		if len(row.Reasons) > 0 {
+			if err := json.Unmarshal(row.Reasons, &value.Reasons); err != nil {
+				return Result{}, fmt.Errorf("decode verdict reasons: %w", err)
+			}
+		}
+		result.Verdict = &value
+	}
+	return result, nil
+}
+
+func valueOrEmpty(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func optional(value string) *string {

@@ -52,6 +52,7 @@ type Config struct {
 	Vision    Vision
 	Verify    Verify
 	Safety    Safety
+	Verdict   Verdict
 }
 
 // HTTP holds the HTTP server settings.
@@ -146,6 +147,13 @@ type Verify struct {
 // live in the versioned YAML file named by ConfigFile; an empty value selects
 // the embedded default.
 type Safety struct {
+	ConfigFile string
+}
+
+// Verdict holds the phase 07 engine settings. Bands, weights, and the gate live
+// in the versioned YAML file named by ConfigFile; an empty value selects the
+// embedded default.
+type Verdict struct {
 	ConfigFile string
 }
 
@@ -270,6 +278,9 @@ func LoadFrom(environ []string) (Config, error) {
 		},
 		Safety: Safety{
 			ConfigFile: l.str("SAFETY_CONFIG_FILE", ""),
+		},
+		Verdict: Verdict{
+			ConfigFile: l.str("VERDICT_CONFIG_FILE", ""),
 		},
 		Vision: Vision{
 			Provider:                l.oneOf("VISION_PROVIDER", "fake", "fake", "claude"),

@@ -13,6 +13,7 @@ import (
 
 	"github.com/benfaruna/medverify/internal/safety"
 	"github.com/benfaruna/medverify/internal/storage"
+	"github.com/benfaruna/medverify/internal/verdict"
 	"github.com/benfaruna/medverify/internal/verify"
 	"github.com/benfaruna/medverify/internal/vision"
 )
@@ -42,12 +43,15 @@ type SafetyChecker interface {
 
 // ServiceOptions configures the scan pipeline.
 type ServiceOptions struct {
-	Store             *Store
-	Objects           storage.Store
-	Provider          vision.Provider
-	Recorder          vision.Recorder
-	Matcher           RegistryMatcher
-	Safety            SafetyChecker
+	Store    *Store
+	Objects  storage.Store
+	Provider vision.Provider
+	Recorder vision.Recorder
+	Matcher  RegistryMatcher
+	Safety   SafetyChecker
+	// Rules is the versioned verdict configuration. When nil no verdict is
+	// computed, which keeps earlier phases' tests and deployments unchanged.
+	Rules             *verdict.Rules
 	Enqueuer          Enqueuer
 	Logger            *slog.Logger
 	MaxImages         int
@@ -67,6 +71,7 @@ type Service struct {
 	recorder          vision.Recorder
 	matcher           RegistryMatcher
 	safety            SafetyChecker
+	rules             *verdict.Rules
 	enqueuer          Enqueuer
 	logger            *slog.Logger
 	maxImages         int
@@ -111,6 +116,7 @@ func NewService(opts ServiceOptions) (*Service, error) {
 		recorder:          opts.Recorder,
 		matcher:           opts.Matcher,
 		safety:            opts.Safety,
+		rules:             opts.Rules,
 		enqueuer:          opts.Enqueuer,
 		logger:            logger,
 		maxImages:         opts.MaxImages,
@@ -346,8 +352,11 @@ func (s *Service) Process(ctx context.Context, rawID string) error {
 	}
 
 	if len(labels) == 0 {
-		// Every image was unreadable. That is a photo problem, not a verdict.
-		s.finish(ctx, id, StatusUnreadable, Result{Reasons: []byte("[]")})
+		// Every image was unreadable. The verdict engine still records that
+		// outcome, so the reason the scan produced no result is auditable.
+		result := Result{Reasons: []byte("[]")}
+		result.Verdict, result.Signals = s.evaluate(verdict.SignalsFromUnreadable(nil))
+		s.finish(ctx, id, StatusUnreadable, result)
 		return nil
 	}
 
@@ -364,11 +373,13 @@ func (s *Service) Process(ctx context.Context, rawID string) error {
 
 	if !label.Identified() || (s.minConfidence > 0 && label.OverallConfidence() < s.minConfidence) {
 		// Low confidence or no key field is unreadable, never a guess.
-		s.finish(ctx, id, StatusUnreadable, Result{
+		result := Result{
 			Extracted: extracted,
 			Provider:  providerName,
 			Reasons:   []byte("[]"),
-		})
+		}
+		result.Verdict, result.Signals = s.evaluate(verdict.SignalsFromUnreadable(label.Unreadable))
+		s.finish(ctx, id, StatusUnreadable, result)
 		return nil
 	}
 
@@ -397,13 +408,15 @@ func (s *Service) Process(ctx context.Context, rawID string) error {
 		}
 	}
 
-	s.finish(ctx, id, StatusCompleted, Result{
+	result := Result{
 		Extracted: extracted,
 		Features:  features,
 		Flags:     flags,
 		Provider:  providerName,
 		Reasons:   []byte("[]"),
-	})
+	}
+	result.Verdict, result.Signals = s.evaluate(verdict.SignalsFrom(match, flags, label))
+	s.finish(ctx, id, StatusCompleted, result)
 	s.logger.InfoContext(ctx, "scan processed",
 		slog.String("scan_id", id.String()),
 		slog.String("status", string(StatusCompleted)),
@@ -412,6 +425,21 @@ func (s *Service) Process(ctx context.Context, rawID string) error {
 		slog.Int("unreadable_images", unreadableImages),
 	)
 	return nil
+}
+
+// evaluate runs the pure verdict engine and returns the result with the exact
+// signals it used. Without a rules file the scan keeps the pre-phase-07 shape.
+func (s *Service) evaluate(signals verdict.Signals) (*verdict.Result, json.RawMessage) {
+	if s.rules == nil {
+		return nil, nil
+	}
+	result := verdict.Evaluate(signals, *s.rules)
+	encoded, err := json.Marshal(signals)
+	if err != nil {
+		s.logger.Error("could not encode verdict signals", slog.Any("err", err))
+		return &result, json.RawMessage("{}")
+	}
+	return &result, encoded
 }
 
 func (s *Service) recordCall(ctx context.Context, id uuid.UUID, result vision.Result, started time.Time, outcome, errorCode string) {

@@ -66,6 +66,8 @@ type Querier interface {
 	ListSMPCSections(ctx context.Context, documentID int64) ([]SmpcSection, error)
 	ListSafetyFlagsForScan(ctx context.Context, scanID uuid.UUID) ([]SafetyFlag, error)
 	ListScanImages(ctx context.Context, scanID uuid.UUID) ([]ScanImage, error)
+	// Replay reads only stored output: no images and no clock.
+	ListScoredScanResults(ctx context.Context, rowLimit int32) ([]ListScoredScanResultsRow, error)
 	ListStaleWatchlistEntries(ctx context.Context, today *time.Time) ([]ListStaleWatchlistEntriesRow, error)
 	ListWatchlistEntries(ctx context.Context) ([]ListWatchlistEntriesRow, error)
 	// Used by readiness probes and by smoke tests. It keeps the sqlc pipeline

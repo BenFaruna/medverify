@@ -22,6 +22,7 @@ import (
 	"github.com/benfaruna/medverify/internal/safety"
 	"github.com/benfaruna/medverify/internal/scan"
 	"github.com/benfaruna/medverify/internal/storage"
+	"github.com/benfaruna/medverify/internal/verdict"
 	"github.com/benfaruna/medverify/internal/verify"
 	"github.com/benfaruna/medverify/internal/vision/visioncfg"
 )
@@ -107,6 +108,11 @@ func run() error {
 		return err
 	}
 
+	rules, err := verdict.LoadRules(cfg.Verdict.ConfigFile)
+	if err != nil {
+		return err
+	}
+
 	scanService, err := scan.NewService(scan.ServiceOptions{
 		Store:     scan.NewStore(pool),
 		Objects:   objects,
@@ -114,6 +120,7 @@ func run() error {
 		Recorder:  llm.NewRecorder(pool),
 		Matcher:   matcher,
 		Safety:    checker,
+		Rules:     &rules,
 		Logger:    logger,
 		MaxImages: cfg.Scan.MaxImages,
 		Limits: scan.ImageLimits{
@@ -145,6 +152,7 @@ func run() error {
 		slog.String("vision_model", cfg.Vision.Model),
 		slog.String("verify_config_version", verifyConfig.Version),
 		slog.String("safety_config_version", safetyConfig.Version),
+		slog.String("verdict_config_version", rules.Version),
 	)
 
 	<-ctx.Done()

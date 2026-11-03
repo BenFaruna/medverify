@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/benfaruna/medverify/internal/safety"
+	"github.com/benfaruna/medverify/internal/verdict"
 )
 
 // Status is the lifecycle state of a scan. The database CHECK constraint and
@@ -81,11 +82,13 @@ type Image struct {
 	CreatedAt   time.Time
 }
 
-// Result is the stored result row. Verdict stays nil until phase 07; Extracted
+// Result is the stored result row. Verdict is the typed phase 07 output,
+// Signals is the exact input it used (so the scan can be replayed), Extracted
 // carries validated label data, Features carries registry verification, and
 // Flags carries the sourced safety findings from phase 06.
 type Result struct {
-	Verdict   json.RawMessage
+	Verdict   *verdict.Result
+	Signals   json.RawMessage
 	Reasons   json.RawMessage
 	Extracted json.RawMessage
 	Features  json.RawMessage
@@ -142,10 +145,14 @@ func (s Scan) View() View {
 	if s.Result == nil {
 		return view
 	}
-	if len(s.Result.Verdict) > 0 {
-		view.Verdict = s.Result.Verdict
-	}
-	if len(s.Result.Reasons) > 0 {
+	if s.Result.Verdict != nil {
+		if encoded, err := json.Marshal(s.Result.Verdict); err == nil {
+			view.Verdict = encoded
+		}
+		if encoded, err := json.Marshal(s.Result.Verdict.Reasons); err == nil {
+			view.Reasons = encoded
+		}
+	} else if len(s.Result.Reasons) > 0 {
 		view.Reasons = s.Result.Reasons
 	}
 	if len(s.Result.Extracted) > 0 {

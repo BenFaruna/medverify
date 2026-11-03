@@ -40,7 +40,7 @@ func TestMigrationsStatusReportsApplied(t *testing.T) {
 
 	statuses, err := migrations.Status(ctx, databaseURL)
 	require.NoError(t, err)
-	require.Len(t, statuses, 6)
+	require.Len(t, statuses, 7)
 	for i, status := range statuses {
 		assert.Equal(t, "applied", string(status.State))
 		assert.Equal(t, int64(i+1), status.Source.Version)
@@ -62,6 +62,18 @@ func TestScanTablesExistAfterMigrateUp(t *testing.T) {
 	// Phase 05 stores registry verification on the result row.
 	assert.True(t, columnExists(t, databaseURL, "scan_results", "features"),
 		"scan_results.features should exist after migration 00005")
+
+	// Phase 07 replaces the placeholder with typed verdict columns and the
+	// signals the verdict was computed from.
+	for _, column := range []string{
+		"verdict_code", "verdict_score", "verdict_confidence",
+		"verdict_rules_version", "signals",
+	} {
+		assert.True(t, columnExists(t, databaseURL, "scan_results", column),
+			"scan_results.%s should exist after migration 00007", column)
+	}
+	assert.False(t, columnExists(t, databaseURL, "scan_results", "verdict"),
+		"scan_results.verdict placeholder should be dropped by migration 00007")
 }
 
 func TestRegistryTablesExistAfterMigrateUp(t *testing.T) {

@@ -116,15 +116,19 @@ type ScanImage struct {
 }
 
 type ScanResult struct {
-	ScanID    uuid.UUID `json:"scan_id"`
-	Verdict   []byte    `json:"verdict"`
-	Reasons   []byte    `json:"reasons"`
-	Extracted []byte    `json:"extracted"`
-	Provider  *string   `json:"provider"`
-	Error     *string   `json:"error"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Features  []byte    `json:"features"`
+	ScanID              uuid.UUID   `json:"scan_id"`
+	Reasons             []byte      `json:"reasons"`
+	Extracted           []byte      `json:"extracted"`
+	Provider            *string     `json:"provider"`
+	Error               *string     `json:"error"`
+	CreatedAt           time.Time   `json:"created_at"`
+	UpdatedAt           time.Time   `json:"updated_at"`
+	Features            []byte      `json:"features"`
+	VerdictCode         *string     `json:"verdict_code"`
+	VerdictScore        pgtype.Int2 `json:"verdict_score"`
+	VerdictConfidence   *string     `json:"verdict_confidence"`
+	VerdictRulesVersion *string     `json:"verdict_rules_version"`
+	Signals             []byte      `json:"signals"`
 }
 
 type SmpcDocument struct {

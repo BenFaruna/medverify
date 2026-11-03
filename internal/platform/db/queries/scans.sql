@@ -41,13 +41,22 @@ SET status = @status,
 WHERE id = @id AND status = 'processing';
 
 -- name: UpsertScanResult :exec
-INSERT INTO scan_results (scan_id, verdict, reasons, extracted, features, provider, error)
+INSERT INTO scan_results (
+  scan_id, verdict_code, verdict_score, verdict_confidence, verdict_rules_version,
+  signals, reasons, extracted, features, provider, error
+)
 VALUES (
-  @scan_id, sqlc.narg('verdict'), @reasons, sqlc.narg('extracted'),
+  @scan_id, sqlc.narg('verdict_code'), sqlc.narg('verdict_score'),
+  sqlc.narg('verdict_confidence'), sqlc.narg('verdict_rules_version'),
+  sqlc.narg('signals'), @reasons, sqlc.narg('extracted'),
   @features, sqlc.narg('provider'), sqlc.narg('error')
 )
 ON CONFLICT (scan_id) DO UPDATE SET
-  verdict = EXCLUDED.verdict,
+  verdict_code = EXCLUDED.verdict_code,
+  verdict_score = EXCLUDED.verdict_score,
+  verdict_confidence = EXCLUDED.verdict_confidence,
+  verdict_rules_version = EXCLUDED.verdict_rules_version,
+  signals = EXCLUDED.signals,
   reasons = EXCLUDED.reasons,
   extracted = EXCLUDED.extracted,
   features = EXCLUDED.features,
@@ -57,6 +66,15 @@ ON CONFLICT (scan_id) DO UPDATE SET
 
 -- name: GetScanResult :one
 SELECT * FROM scan_results WHERE scan_id = @scan_id;
+
+-- name: ListScoredScanResults :many
+-- Replay reads only stored output: no images and no clock.
+SELECT scan_id, verdict_code, verdict_score, verdict_confidence,
+       verdict_rules_version, reasons, signals, created_at
+FROM scan_results
+WHERE verdict_code IS NOT NULL
+ORDER BY created_at DESC
+LIMIT @row_limit;
 
 -- name: ListScanImages :many
 SELECT * FROM scan_images WHERE scan_id = @scan_id ORDER BY position;
