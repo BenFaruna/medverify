@@ -21,15 +21,15 @@ No verdict is called safe, genuine, authentic, fake, or counterfeit. If the API 
 
 ## 2. Deliverables checklist
 
-- [ ] Signals struct: the normalized inputs (match outcome, per-field outcomes, flags, extraction confidences)
-- [ ] Rules file (YAML) with weights, thresholds, and a version string
-- [ ] Pure function Evaluate(signals, rules) returning Verdict, Score, Confidence, Reasons
-- [ ] Reason catalog: codes, parameters, and the wording per language (reviewed text, not generated)
-- [ ] Persistence: full signals, rules version, and output stored in scan\_results
-- [ ] Short-circuit rules (for example unreadable input skips scoring)
-- [ ] Scenario test suite (golden cases) and property tests
-- [ ] Documentation of the scoring philosophy in docs/scoring.md
-- [ ] A replay command: re-run the verdict for stored scans with a different rules version and show differences
+- [x] Signals struct: the normalized inputs (match outcome, per-field outcomes, flags, extraction confidences)
+- [x] Rules file (YAML) with weights, thresholds, and a version string
+- [x] Pure function Evaluate(signals, rules) returning Verdict, Score, Confidence, Reasons
+- [ ] Reason catalog: codes, parameters, and the wording per language (reviewed text, not generated) — codes and English catalog are in place; the pharmacist review has not happened
+- [x] Persistence: full signals, rules version, and output stored in scan\_results
+- [x] Short-circuit rules (for example unreadable input skips scoring)
+- [x] Scenario test suite (golden cases) and property tests
+- [x] Documentation of the scoring philosophy in docs/scoring.md
+- [x] A replay command: re-run the verdict for stored scans with a different rules version and show differences
 
 ## 3. Tools needed
 
@@ -105,3 +105,99 @@ No verdict is called safe, genuine, authentic, fake, or counterfeit. If the API 
 - Write the scenario table tests first, then implement.
 - Do not add new verdict values without updating this document, the OpenAPI enum, the assistant policy (phase 09), and the catalog.
 - Do not use an LLM anywhere in this phase.
+
+## 10. Implementation notes
+
+- **Package layout.** `internal/verdict` holds the closed verdict set
+  (`types.go`), the normalized input (`signals.go`), the versioned policy and
+  its validation (`rules.go`), the evaluator (`evaluate.go`), and the reason
+  catalog loader (`reasons.go`). Nothing in the package touches a database, a
+  clock, or a network connection.
+- **Verdicts.** The closed set is `consistent_with_records`, `mismatch_found`,
+  `not_found_in_records`, `flagged`, `needs_review`, and `unreadable`. Each has
+  a doc comment stating what it does not claim; none of them says a medicine is
+  safe, genuine, authentic, fake, or counterfeit. Adding a value requires a
+  rules band, an OpenAPI enum entry, and a change to the phase 09 assistant
+  policy.
+- **Rules file.** `internal/verdict/config/verdict-v1.yaml` is embedded and
+  versioned. `VERDICT_CONFIG_FILE` overrides it; `config.Load` exposes it as
+  `cfg.Verdict.ConfigFile` and the worker logs `verdict_config_version` at
+  startup. Unknown keys are rejected, bands must be closed, ordered, and inside
+  0-100, weights are range-checked, and the confidence thresholds must be
+  ordered. Invalid configuration fails startup rather than degrading a scan.
+- **Migration.** `00007_verdict.sql` drops the unused `scan_results.verdict`
+  jsonb column and adds `verdict_code`, `verdict_score`, `verdict_confidence`,
+  `verdict_rules_version`, and `signals`. A CHECK constraint allows either all
+  five to be null (not yet scored) or all five to be present, so a half-written
+  verdict cannot be stored. Codes and confidence values are constrained by
+  CHECK, score is constrained to 0-100, and two indexes support replay and
+  analytics by version and recency. The down migration restores the placeholder
+  column.
+- **Store and API.** `scan.Store.FinishScan` writes the typed verdict and the
+  exact signals in the same upsert as the rest of the result; it refuses a
+  verdict without signals. `Store.ListVerdictReplay` reads stored rows only.
+  `scan.View` marshals the typed verdict, and the OpenAPI schema replaces the
+  opaque `verdict` object with an explicit `Verdict` plus `VerdictReason`
+  (code, field, message, params) and documents the score as internal.
+- **Evaluation wiring.** `scan.Service` takes an optional `Rules` pointer. When
+  it is set, completed scans evaluate `SignalsFrom(match, flags, label)` and
+  unreadable scans (no readable image, unidentified label, or low confidence)
+  evaluate `SignalsFromUnreadable`, so even a photo-only failure has an
+  auditable verdict. When it is nil no verdict is computed, which keeps earlier
+  phases' behavior and tests unchanged.
+- **Reasons.** Output carries stable codes and parameters only; the reviewed
+  sentence lives in `reasons/en.yaml` and is rendered server-side. Reasons are
+  deduplicated, sorted by importance, and capped by `max_reasons` (8). A test
+  asserts every emitted code has a template and that no rendered sentence or
+  catalog entry contains the forbidden words. Only `en` is supported.
+- **Scenario table.** `testdata/scenarios.yaml` holds 50 cases covering every
+  verdict, written before the weights were selected. A loader test requires
+  every verdict to appear and the scenario tests assert each expected outcome,
+  score band, confidence, and reason code. It is marked a draft specification
+  pending review.
+- **Replay.** `medverify-admin verdict replay --rules <file> [--limit N]`
+  re-evaluates stored signals under a candidate rules file and prints changed
+  scans (stored vs replayed value/confidence/score and which changed) plus a
+  per-verdict count. It writes nothing and is a dry run by design.
+- **Tests.** Unit tests cover the gate, hard rule, band mapping, confidence,
+  unknown-field handling, every reason code, rules validation, wording, and
+  boundary values. Property tests cover determinism (1,000 randomized signal
+  sets evaluated twice) and monotonicity (adding a concern never lowers the
+  score). Integration tests cover typed persistence, the stored signals,
+  rules-version auditing, and replay under a stricter rules file.
+- **Not done.** No LLM is used anywhere in this phase, and no machine-learned
+  model was built. The `signals` column is the training input for a future
+  model once labels exist; nothing consumes it yet.
+
+## 11. Blockers and open items
+
+All four external blockers remain open. None is resolved by this phase's code:
+
+1. **Consented, double-labelled 100+ photo eval set.** The extraction harness
+   is ready; the dataset is absent, so no held-out evaluation of the weights
+   exists.
+2. **Live provider acceptance run.** Needs `VISION_API_KEY`, pinned model ids,
+   a provider spending cap, and data-handling approval.
+3. **Data-handling decision** for sending pack photos to a foreign provider.
+4. **NAFDAC data-sharing agreement** from phase 02.
+
+Open items specific to this phase:
+
+- The verdict meanings, the 50-case scenario table, the score bands, and the
+  weights are a proposed engineering policy. The project lead and a pharmacist
+  must sign them off before release; no test treats them as clinically
+  approved.
+- `internal/verdict/reasons/en.yaml` is draft wording. It must not be presented
+  as approved clinical communication until a pharmacist reviews it.
+- Only English reason text exists. Any second language needs a complete catalog,
+  or the wording-completeness test fails.
+- The weights were chosen from the scenario table, not from real distribution
+  data. Alert fatigue and false reassurance have not been measured against a
+  pilot.
+- The held-out eval set is unavailable, so overfitting of the weights cannot be
+  ruled out yet.
+- The phase 09 assistant policy must mirror these verdicts and the same
+  forbidden wording; it does not exist yet.
+- `docs/scoring-philosophy.md` was written in phase 1 before the internal score
+  existed. `docs/scoring.md` now documents the implemented behavior; the two
+  should be merged when the policy is signed off.

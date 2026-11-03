@@ -20,7 +20,7 @@ Update the Status column as work progresses (Not started, In progress, In review
 | 04 | Label extraction | 03 | 2 | In review |
 | 05 | Registry verification | 02, 04 | 1 | In review |
 | 06 | Ingredient safety checks | 02, 05 | 2 | In review |
-| 07 | Verdict engine | 05, 06 | 1 | Not started |
+| 07 | Verdict engine | 05, 06 | 1 | In review |
 | 08 | Leaflet indexing (RAG) | 02 | 2 | Not started |
 | 09 | Grounded Q and A assistant | 07, 08 | 3-4 | Not started |
 | 10 | Evals and guardrails | starts with 04, runs to the end | ongoing | Not started |

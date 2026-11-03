@@ -9,7 +9,7 @@ The system never says a medicine is safe, genuine, or authentic. See
 [docs/scoring-philosophy.md](docs/scoring-philosophy.md) and the product rules in
 [the build tracker](docs/phases/MedVerify%20NG%20-%2000%20Build%20Tracker%20and%20Engineering%20Conventions.md).
 
-Current state: **phase 6 (ingredient safety checks), in review**. Uploads are
+Current state: **phase 7 (verdict engine), in review**. Uploads are
 validated, re-encoded to strip EXIF and GPS, stored privately, processed by a
 River job, and exposed through POST/GET /v1/scans. Each image goes through a
 configurable vision provider; the default is a deterministic fake, and
@@ -40,6 +40,20 @@ the watchlist is added automatically: only the admin import writes entries, and
 the process is documented in
 [docs/watchlist-process.md](docs/watchlist-process.md).
 
+Phase 7 turns that evidence into one deterministic verdict stored in typed
+columns on `scan_results`: `consistent_with_records`, `mismatch_found`,
+`not_found_in_records`, `flagged`, `needs_review`, or `unreadable`. The engine is
+a pure function of the recorded signals and a versioned YAML policy
+(`config/verdict-v1.yaml`, `VERDICT_CONFIG_FILE`); it uses no LLM, no clock, and
+no database. A 0-100 score exists for sorting but is never a probability and is
+never displayed as one. Reasons are stable codes rendered from a reviewed
+catalog, still marked draft pending a pharmacist. Every result stores the
+signals and rules version that produced it, and
+`admin verdict replay --rules <file>` re-scores stored scans under a candidate
+policy without writing anything. The verdict meanings, the 50-case scenario
+table, and the weights are a proposed policy awaiting sign-off; see
+[docs/scoring.md](docs/scoring.md).
+
 The phase 2 live-ingestion acceptance run, the consented 100+ photo extraction
 eval set, the live provider acceptance run, the data-handling decision, and the
 written NAFDAC data-sharing agreement are still open; see the
@@ -47,7 +61,8 @@ written NAFDAC data-sharing agreement are still open; see the
 the [phase 3 notes](docs/phases/MedVerify%20NG%20-%2003%20Scan%20Pipeline%20Skeleton.md#9-implementation-notes),
 the [phase 4 notes](docs/phases/MedVerify%20NG%20-%2004%20Label%20Extraction.md#9-implementation-notes),
 the [phase 5 notes](docs/phases/MedVerify%20NG%20-%2005%20Registry%20Verification.md#11-blockers-and-open-items),
-and the [phase 6 notes](docs/phases/MedVerify%20NG%20-%2006%20Ingredient%20Safety%20Checks.md#11-blockers-and-open-items).
+the [phase 6 notes](docs/phases/MedVerify%20NG%20-%2006%20Ingredient%20Safety%20Checks.md#11-blockers-and-open-items),
+and the [phase 7 notes](docs/phases/MedVerify%20NG%20-%2007%20Verdict%20Engine.md#11-blockers-and-open-items).
 
 ## Quickstart
 
