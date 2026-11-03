@@ -9,7 +9,7 @@ The system never says a medicine is safe, genuine, or authentic. See
 [docs/scoring-philosophy.md](docs/scoring-philosophy.md) and the product rules in
 [the build tracker](docs/phases/MedVerify%20NG%20-%2000%20Build%20Tracker%20and%20Engineering%20Conventions.md).
 
-Current state: **phase 7 (verdict engine), in review**. Uploads are
+Current state: **phase 8 (leaflet indexing and retrieval), in review**. Uploads are
 validated, re-encoded to strip EXIF and GPS, stored privately, processed by a
 River job, and exposed through POST/GET /v1/scans. Each image goes through a
 configurable vision provider; the default is a deterministic fake, and
@@ -54,6 +54,18 @@ policy without writing anything. The verdict meanings, the 50-case scenario
 table, and the weights are a proposed policy awaiting sign-off; see
 [docs/scoring.md](docs/scoring.md).
 
+Phase 8 chunks each leaflet section, embeds the chunks, and retrieves passages
+for one product only, combining vector and full-text rank. Chunks store the
+embedding model and document hash, so indexing is idempotent and re-embeds only
+changed documents. The embeddings provider and vector dimension are still an
+open decision: the default is a deterministic fake for local work, and the HTTP
+client targets any OpenAI-compatible endpoint. `admin rag index|chunks|coverage|eval`
+manage the corpus, and the worker registers an opt-in scheduled pass
+(`EMBEDDINGS_INDEX_INTERVAL`). Retrieval scope is enforced by product in SQL and
+tested for cross-product and cross-model leaks. There is no labelled retrieval
+eval set yet, so recall has not been measured. See the
+[phase 8 notes](docs/phases/MedVerify%20NG%20-%2008%20Leaflet%20Indexing%20(RAG).md#11-blockers-and-open-items).
+
 The phase 2 live-ingestion acceptance run, the consented 100+ photo extraction
 eval set, the live provider acceptance run, the data-handling decision, and the
 written NAFDAC data-sharing agreement are still open; see the
@@ -62,7 +74,8 @@ the [phase 3 notes](docs/phases/MedVerify%20NG%20-%2003%20Scan%20Pipeline%20Skel
 the [phase 4 notes](docs/phases/MedVerify%20NG%20-%2004%20Label%20Extraction.md#9-implementation-notes),
 the [phase 5 notes](docs/phases/MedVerify%20NG%20-%2005%20Registry%20Verification.md#11-blockers-and-open-items),
 the [phase 6 notes](docs/phases/MedVerify%20NG%20-%2006%20Ingredient%20Safety%20Checks.md#11-blockers-and-open-items),
-and the [phase 7 notes](docs/phases/MedVerify%20NG%20-%2007%20Verdict%20Engine.md#11-blockers-and-open-items).
+the [phase 7 notes](docs/phases/MedVerify%20NG%20-%2007%20Verdict%20Engine.md#11-blockers-and-open-items),
+and the [phase 8 notes](docs/phases/MedVerify%20NG%20-%2008%20Leaflet%20Indexing%20(RAG).md#11-blockers-and-open-items).
 
 ## Quickstart
 

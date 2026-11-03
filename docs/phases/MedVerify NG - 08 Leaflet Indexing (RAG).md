@@ -6,15 +6,15 @@
 
 ## 1. Deliverables checklist
 
-- [ ] Embedder interface and one provider implementation, plus a deterministic fake for tests
-- [ ] Chunker: section-aware, size-bounded, with overlap and context headers
-- [ ] Table smpc\_chunks with vector, tsvector, and metadata columns
-- [ ] Backfill job: idempotent, resumable, rate limited
-- [ ] Incremental job: re-chunk and re-embed only documents whose sha256 changed
-- [ ] Retrieval function: filter by product, hybrid ranking (vector plus full text), section filters
-- [ ] Embedding model versioning and a re-embed procedure
-- [ ] Retrieval evaluation set and recall scoring command (see document 10)
-- [ ] Admin command to inspect chunks for a product
+- [x] Embedder interface and one provider implementation, plus a deterministic fake for tests
+- [x] Chunker: section-aware, size-bounded, with overlap and context headers
+- [x] Table smpc\_chunks with vector, tsvector, and metadata columns
+- [x] Backfill job: idempotent, resumable, rate limited
+- [x] Incremental job: re-chunk and re-embed only documents whose sha256 changed
+- [x] Retrieval function: filter by product, hybrid ranking (vector plus full text), section filters
+- [x] Embedding model versioning and a re-embed procedure
+- [ ] Retrieval evaluation set and recall scoring command (see document 10) — scoring command and format exist; the 100+ labelled questions do not
+- [x] Admin command to inspect chunks for a product
 
 ## 2. Tools needed
 
@@ -132,3 +132,98 @@ Some providers use different modes for documents and queries, which is why there
 - The product ID must be a required parameter of the retrieval function, not optional.
 - Use the fake embedder in all unit and integration tests. Real embedding calls only in the nightly eval and the backfill command.
 - Do not change the vector dimension without writing a migration and a re-embed plan in this document.
+
+## 10. Implementation notes
+
+- **Schema.** Migration `00008` adds `smpc_chunks`. Every row carries
+  `product_id`, `document_id`, `section_id`, the clean `chunk_text`, the
+  `embedding_text` that was embedded, `chunk_hash`, `token_count`, the vector,
+  `embedding_model`, and `document_sha256`. The generated `tsv` column feeds
+  full-text rank. The vector column is `vector(1024)`; retrieval never mixes
+  models because every query filters on `embedding_model`. Indexes cover
+  `(product_id, section_code)`, `tsv`, `(embedding_model, product_id)`, and
+  `document_id`. No approximate vector index is created: with a few dozen rows
+  per product an exact scan is faster and exact, and ANN plus a filter silently
+  returns fewer rows than asked for.
+- **Chunking.** `rag.ChunkDocument` splits inside one section only, prefers
+  paragraph boundaries, then sentence boundaries. A single sentence longer than
+  a chunk (a flattened table) is split on word boundaries as a last resort. The
+  defaults are 400 target tokens, 500 maximum, and 50 tokens of sentence-aligned
+  overlap; the overlap is dropped rather than exceed the maximum. Token counts
+  are estimated from word count (4/3 per word) and are only used for sizing, not
+  billing. The context header (`product name (NRN)`) goes only into
+  `embedding_text`; `chunk_text` is what a citation quotes.
+- **Hashes and re-embedding.** The chunk hash covers the embedding text and the
+  model name, so a model change invalidates every hash. The document hash is
+  `smpc_documents.sha256`. The selection query returns only readable documents
+  that have no chunks for the current model and document hash, so the same pass
+  is the backfill and the incremental job, and a crashed run resumes from the
+  first unfinished document.
+- **Embedder.** `rag.Embedder` has separate document and query methods. The
+  deterministic `FakeEmbedder` hashes words and word pairs into the vector space
+  and is the default locally; it is explicitly not a production index. The
+  generic `HTTPEmbedder` posts to any OpenAI-compatible `/embeddings` endpoint,
+  batches requests, validates the returned count and dimension, and never logs
+  the key. The provider and model remain an open decision (tracker row 08);
+  `EMBEDDINGS_*` config fails at startup when the dimension differs from 1024 or
+  an HTTP embedder is missing its URL or model.
+- **Indexing.** `rag.Store.Index` processes a bounded number of documents
+  sequentially, applies an optional inter-document delay, and replaces one
+  document's chunks in a transaction after all its vectors are computed. A
+  provider failure therefore leaves the old chunks intact and makes the job
+  retryable; no document is ever half-written. Documents with no usable sections
+  are counted as skipped and logged by ID.
+- **Retrieval.** `rag.Store.Search` embeds the question and runs two SQL queries
+  for one product: vector distance and full-text rank, each with an optional
+  exact `section_code` filter. Results are merged with reciprocal rank fusion
+  (k = 60). `SearchVector` exists for eval so a harness can supply a vector and
+  use the real query string for full-text rank. Product scope and model scope
+  are `WHERE` clauses, not caller checks, so no argument can widen a search.
+- **CLI and job.** `admin rag index` runs a pass; `admin rag chunks <nrn>` shows
+  stored chunks and their hashes; `admin rag coverage` prints corpus counts;
+  `admin rag eval --file <yaml>` scores recall and correct-no-answer. The worker
+  registers a `rag_index` job that can be enqueued explicitly, with an opt-in
+  `EMBEDDINGS_INDEX_INTERVAL` schedule (default off).
+- **Eval.** `testdata/rag/eval-draft.yaml` is a five-case format fixture with
+  synthetic NRNs, not a quality measurement. `rag.Evaluate` scores recall at K
+  per expected section and treats an unanswerable case as correct when every
+  returned hit is below the similarity floor (0.35). The required 100+ labelled
+  questions do not exist; neither does a real corpus or provider key.
+- **Tests.** Unit tests cover chunk boundaries, sentence integrity, overlap,
+  determinism, header separation, fake vectors, HTTP batching and dimension
+  errors, and eval scoring. Integration tests cover idempotent re-indexing,
+  changed-hash re-indexing, skipping OCR documents, cross-product isolation,
+  section filters, lexical-only queries, model isolation, coverage, product
+  resolution, and startup rejection of a mismatched dimension. No retrieval
+  latency benchmark was added because there is no real corpus to measure.
+
+## 11. Blockers and open items
+
+All four external blockers remain open. None is resolved by this phase's code:
+
+1. **Consented, double-labelled 100+ photo eval set.** The extraction harness
+   is ready; the dataset is absent.
+2. **Live provider acceptance run.** Needs `VISION_API_KEY`, pinned model ids,
+   a provider spending cap, and data-handling approval.
+3. **Data-handling decision** for sending pack photos to a foreign provider.
+4. **NAFDAC data-sharing agreement** from phase 02.
+
+Open items specific to this phase:
+
+- **Embedding provider and dimension** are not decided. The schema fixes 1024
+  and the generic HTTP client is provider-neutral; changing the dimension needs
+  a migration and a full re-embed, so decide before the first production index.
+- **No labelled retrieval eval set.** The scoring command and file format exist,
+  but the 100+ questions (English first, then other languages) do not, so the
+  agreed recall-at-5 gate has not been measured.
+- **No real corpus or corpus coverage report.** Only synthetic fixtures and
+  whatever a development database happens to hold. Products with OCR-only
+  leaflets are excluded until text exists, and their share is unknown.
+- **No production embedding run.** The fake embedder is the default, so the
+  local index is lexical only and its search quality says nothing about the
+  chosen provider.
+- **Tables and flattened PDFs.** The chunker falls back to word splitting for
+  very long sentences. A real leaflet sample has not been inspected to see how
+  often table-heavy sections degrade.
+- **Phase 09 dependency still open:** whether the assistant may relay leaflet
+  dosage text (default: no, link only) is a pharmacist and project-lead decision.
