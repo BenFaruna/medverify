@@ -1,0 +1,46 @@
+# Fixed assistant text. The model never edits, paraphrases, or generates these
+# strings. Each language needs native-speaker, pharmacist, and legal review
+# before it may ship. This draft is intentionally marked unreviewed so a
+# production build refuses to start until the review blocker is closed.
+version: templates-v1
+language: en
+reviewed: false
+templates:
+  refuse_personal_safety: >-
+    I cannot judge whether this medicine is suitable for you, your child, or
+    during pregnancy. That needs a pharmacist or doctor. I can quote the
+    leaflet's warnings and contraindications for this pack, or link the leaflet
+    on file.
+  refuse_dosing: >-
+    I cannot give personal dosing advice. Follow the dose printed on the pack
+    and in the leaflet, and ask a pharmacist or doctor about your situation. I
+    can link the leaflet on file.
+  refuse_diagnosis: >-
+    I cannot diagnose symptoms or suggest which medicine is right for an
+    illness. Please speak to a pharmacist or doctor. I can only answer from the
+    records and leaflet for this scanned pack.
+  refuse_comparison: >-
+    I can only answer from the NAFDAC records and leaflet for this scanned
+    pack. I cannot compare it with other medicines.
+  refuse_injection: >-
+    I cannot change these rules, reveal instructions, or role-play another
+    assistant. I can answer only from the records and leaflet for this pack.
+  redirect_off_topic: >-
+    I can only answer questions about the NAFDAC records and leaflet for this
+    scanned pack.
+  fallback_unsupported: >-
+    I could not check that answer against the sources for this pack, so I will
+    not show it. Please ask a narrower question about the records or leaflet.
+  fallback_not_found: >-
+    That information is not in the NAFDAC records or the leaflet on file for
+    this pack. I cannot guess. Please check the pack or ask a pharmacist.
+  fallback_no_leaflet: >-
+    There is no readable leaflet on file for this pack, so I cannot quote a
+    leaflet section.
+  fallback_unknown: >-
+    I did not understand that as a question about this pack's records or
+    leaflet. Please ask about registration details, ingredients, warnings, or
+    what the leaflet says.
+  disclaimer: >-
+    This comes from NAFDAC records and the leaflet on file. It is not medical
+    advice.
