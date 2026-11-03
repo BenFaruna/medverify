@@ -1,0 +1,32 @@
+version: rag-eval-draft-v1
+# STATUS: draft format example and parser fixture. It is not a labelled
+# evaluation set: the products here are synthetic. Phase 08 requires 100 or
+# more real questions, labelled with the product, the section that answers it,
+# or unanswerable, reviewed by someone who knows the leaflet. Do not quote these
+# numbers as a quality measurement.
+cases:
+  - id: para-dose
+    product: "04-0858"
+    question: How much paracetamol can an adult take in one day?
+    section: "4.2"
+    language: en
+  - id: para-warning-liver
+    product: "04-0858"
+    question: What does the leaflet say about liver problems?
+    section: "4.4"
+    language: en
+  - id: para-storage
+    product: "04-0858"
+    question: How should these tablets be stored?
+    section: "6.4"
+    language: en
+  - id: para-unanswerable-price
+    product: "04-0858"
+    question: How much does this pack cost in Lagos?
+    unanswerable: true
+    language: en
+  - id: para-unanswerable-baby
+    product: "04-0858"
+    question: Should I give this to my two-week-old baby?
+    unanswerable: true
+    language: en

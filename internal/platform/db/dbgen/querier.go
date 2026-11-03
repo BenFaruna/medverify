@@ -18,6 +18,7 @@ type Querier interface {
 	CountProductIngredients(ctx context.Context) (int64, error)
 	CountProducts(ctx context.Context) (int64, error)
 	CountProductsWithLeafletURL(ctx context.Context) (int64, error)
+	CountRAGChunksByModel(ctx context.Context, embeddingModel string) (int64, error)
 	CountSMPCDocumentsByStatus(ctx context.Context) ([]CountSMPCDocumentsByStatusRow, error)
 	CountSMPCSections(ctx context.Context) (int64, error)
 	// Queries for the scan pipeline (phase 03). Hand-written SQL only; sqlc
@@ -25,6 +26,7 @@ type Querier interface {
 	CreateScan(ctx context.Context, arg CreateScanParams) (Scan, error)
 	DeactivateWatchlistEntry(ctx context.Context, id int64) (int64, error)
 	DeleteProductIngredients(ctx context.Context, productID int64) error
+	DeleteRAGChunksForDocumentModel(ctx context.Context, arg DeleteRAGChunksForDocumentModelParams) error
 	DeleteSMPCSections(ctx context.Context, documentID int64) error
 	// Safety flags raised by registry verification (phase 06). Flags are replaced
 	// atomically with each terminal scan result, so a retry never leaves stale
@@ -46,6 +48,7 @@ type Querier interface {
 	// stored here.
 	InsertLLMCall(ctx context.Context, arg InsertLLMCallParams) (LlmCall, error)
 	InsertProductIngredient(ctx context.Context, arg InsertProductIngredientParams) error
+	InsertRAGChunk(ctx context.Context, arg InsertRAGChunkParams) error
 	InsertSMPCSection(ctx context.Context, arg InsertSMPCSectionParams) error
 	InsertSafetyFlag(ctx context.Context, arg InsertSafetyFlagParams) error
 	InsertScanImage(ctx context.Context, arg InsertScanImageParams) (ScanImage, error)
@@ -53,6 +56,10 @@ type Querier interface {
 	InsertWatchlistEntry(ctx context.Context, arg InsertWatchlistEntryParams) (int64, error)
 	LastSuccessfulSyncRun(ctx context.Context) (SyncRun, error)
 	LatestSyncRun(ctx context.Context) (SyncRun, error)
+	// Documents that are readable and have not yet been indexed for this model and
+	// this exact file hash. Completed documents drop out, so a crashed backfill
+	// resumes without re-embedding everything.
+	ListDocumentsForRAGIndex(ctx context.Context, arg ListDocumentsForRAGIndexParams) ([]ListDocumentsForRAGIndexRow, error)
 	ListIngredientNameCounts(ctx context.Context, rowLimit int32) ([]ListIngredientNameCountsRow, error)
 	ListLiveWatchlistEntriesByIngredients(ctx context.Context, arg ListLiveWatchlistEntriesByIngredientsParams) ([]ListLiveWatchlistEntriesByIngredientsRow, error)
 	ListLiveWatchlistEntriesByNRN(ctx context.Context, arg ListLiveWatchlistEntriesByNRNParams) ([]ListLiveWatchlistEntriesByNRNRow, error)
@@ -62,6 +69,8 @@ type Querier interface {
 	// Successful, scanned, and oversized documents are not re-downloaded every
 	// night unless the product itself changed.
 	ListProductsForLeafletSync(ctx context.Context, rowLimit int32) ([]ListProductsForLeafletSyncRow, error)
+	ListRAGChunksForProduct(ctx context.Context, arg ListRAGChunksForProductParams) ([]ListRAGChunksForProductRow, error)
+	ListRAGDocumentSections(ctx context.Context, documentID int64) ([]ListRAGDocumentSectionsRow, error)
 	ListRecentSyncRuns(ctx context.Context, rowLimit int32) ([]SyncRun, error)
 	ListSMPCSections(ctx context.Context, documentID int64) ([]SmpcSection, error)
 	ListSafetyFlagsForScan(ctx context.Context, scanID uuid.UUID) ([]SafetyFlag, error)
@@ -73,6 +82,7 @@ type Querier interface {
 	// Used by readiness probes and by smoke tests. It keeps the sqlc pipeline
 	// exercised until phase 02 adds real tables and queries.
 	Ping(ctx context.Context) (int64, error)
+	RAGCoverage(ctx context.Context, embeddingModel string) (RAGCoverageRow, error)
 	// River retries a failed job. Moving failed back to queued is the only
 	// transition that lets the retry claim the scan again.
 	RequeueFailedScan(ctx context.Context, id uuid.UUID) (int64, error)
@@ -85,6 +95,8 @@ type Querier interface {
 	// usable; similarity() orders the results so typos and word-order changes rank
 	// below exact matches.
 	SearchProductsByName(ctx context.Context, arg SearchProductsByNameParams) ([]SearchProductsByNameRow, error)
+	SearchRAGChunksByText(ctx context.Context, arg SearchRAGChunksByTextParams) ([]SearchRAGChunksByTextRow, error)
+	SearchRAGChunksByVector(ctx context.Context, arg SearchRAGChunksByVectorParams) ([]SearchRAGChunksByVectorRow, error)
 	StartSyncRun(ctx context.Context, startedAt time.Time) (SyncRun, error)
 	// Queries for the Greenbook registry. Hand-written SQL only; sqlc compiles it.
 	// Insert or update a product when its payload hash changed. The xmax trick

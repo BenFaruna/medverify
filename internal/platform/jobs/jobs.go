@@ -57,6 +57,7 @@ type WorkerOption func(*workerOptions)
 type workerOptions struct {
 	greenbook GreenbookRunner
 	scan      ProcessScanRunner
+	rag       RAGIndexRunner
 }
 
 // WithGreenbookRunner registers the Greenbook sync worker. Without it the job
@@ -69,6 +70,12 @@ func WithGreenbookRunner(runner GreenbookRunner) WorkerOption {
 // it because it only enqueues work.
 func WithScanRunner(runner ProcessScanRunner) WorkerOption {
 	return func(opts *workerOptions) { opts.scan = runner }
+}
+
+// WithRAGRunner registers the leaflet indexing worker. The API process omits it
+// because it only enqueues work.
+func WithRAGRunner(runner RAGIndexRunner) WorkerOption {
+	return func(opts *workerOptions) { opts.rag = runner }
 }
 
 // NewWorkers registers every worker this build knows about.
@@ -85,6 +92,9 @@ func NewWorkers(logger *slog.Logger, opts ...WorkerOption) *river.Workers {
 	}
 	if options.scan != nil {
 		river.AddWorker(workers, &ProcessScanWorker{Runner: options.scan, Logger: logger})
+	}
+	if options.rag != nil {
+		river.AddWorker(workers, &RAGIndexWorker{Runner: options.rag, Logger: logger})
 	}
 	return workers
 }

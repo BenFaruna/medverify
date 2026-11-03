@@ -7,6 +7,7 @@
 //	medverify-admin storage init
 //	medverify-admin job noop [message]
 //	medverify-admin verdict replay --rules <file> [--limit N]
+//	medverify-admin rag index|chunks|coverage|eval
 package main
 
 import (
@@ -28,6 +29,7 @@ import (
 	"github.com/benfaruna/medverify/internal/platform/db"
 	"github.com/benfaruna/medverify/internal/platform/jobs"
 	"github.com/benfaruna/medverify/internal/platform/logging"
+	"github.com/benfaruna/medverify/internal/rag"
 	"github.com/benfaruna/medverify/internal/registry"
 	"github.com/benfaruna/medverify/internal/safety"
 	"github.com/benfaruna/medverify/internal/scan"
@@ -58,6 +60,13 @@ commands:
   verdict replay --rules <file> [--limit N]
                         re-score stored scans under a different rules file and
                         show which verdicts changed (dry run, writes nothing)
+  rag index [--limit N] [--delay 200ms]
+                        chunk and embed leaflets that are not indexed yet
+  rag chunks <nrn|product-id> [--limit N]
+                        show stored chunks for one product
+  rag coverage          show how much of the leaflet corpus is indexed
+  rag eval --file <yaml> [--k N] [--min-recall 0.85]
+                        score retrieval against a labelled eval set
 `
 
 func main() {
@@ -104,6 +113,8 @@ func run(args []string) error {
 		return watchlistCommand(ctx, cfg, args[1:])
 	case "verdict":
 		return verdictCommand(ctx, cfg, args[1:])
+	case "rag":
+		return ragCommand(ctx, cfg, args[1:])
 	case "help", "-h", "--help":
 		_, _ = fmt.Fprint(os.Stdout, usage)
 		return nil
@@ -404,6 +415,244 @@ func printIngestionReport(report registry.IngestionReport) {
 		}
 		_ = w.Flush()
 	}
+}
+
+func ragCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("rag requires one of: index, chunks, coverage, eval")
+	}
+	switch args[0] {
+	case "index":
+		return ragIndex(ctx, cfg, args[1:])
+	case "chunks":
+		return ragChunks(ctx, cfg, args[1:])
+	case "coverage":
+		return ragCoverage(ctx, cfg, args[1:])
+	case "eval":
+		return ragEval(ctx, cfg, args[1:])
+	default:
+		return fmt.Errorf("unknown rag action %q", args[0])
+	}
+}
+
+func ragIndex(ctx context.Context, cfg config.Config, args []string) error {
+	limit := cfg.Embeddings.BackfillLimit
+	delay := cfg.Embeddings.Delay
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--limit":
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("--limit requires a number")
+			}
+			value, err := strconv.Atoi(args[i])
+			if err != nil || value <= 0 {
+				return fmt.Errorf("--limit must be a positive number")
+			}
+			limit = value
+		case "--delay":
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("--delay requires a duration")
+			}
+			value, err := time.ParseDuration(args[i])
+			if err != nil || value < 0 {
+				return fmt.Errorf("--delay must be a duration such as 200ms")
+			}
+			delay = value
+		default:
+			return fmt.Errorf("unknown rag index option %q", args[i])
+		}
+	}
+
+	embedder, err := rag.NewEmbedder(cfg.Embeddings)
+	if err != nil {
+		return err
+	}
+	pool, err := db.Open(cfg.Database)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	store := rag.NewStore(pool)
+	summary, err := store.Index(ctx, embedder, rag.IndexOptions{
+		Limit: limit, Delay: delay, Logger: slog.Default(),
+	})
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(os.Stdout, "indexed %d documents, %d chunks (%d skipped) with %s\n",
+		summary.Documents, summary.Chunks, summary.Skipped, embedder.Model())
+	return ragCoverage(ctx, cfg, nil)
+}
+
+func ragChunks(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("rag chunks requires an NRN, source id, or product id")
+	}
+	reference := args[0]
+	limit := 50
+	for i := 1; i < len(args); i++ {
+		switch args[i] {
+		case "--limit":
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("--limit requires a number")
+			}
+			value, err := strconv.Atoi(args[i])
+			if err != nil || value <= 0 {
+				return fmt.Errorf("--limit must be a positive number")
+			}
+			limit = value
+		default:
+			return fmt.Errorf("unknown rag chunks option %q", args[i])
+		}
+	}
+
+	embedder, err := rag.NewEmbedder(cfg.Embeddings)
+	if err != nil {
+		return err
+	}
+	pool, err := db.Open(cfg.Database)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	store := rag.NewStore(pool)
+	productID, err := store.ResolveProduct(ctx, reference)
+	if err != nil {
+		return err
+	}
+	chunks, err := store.ChunksForProduct(ctx, productID, embedder.Model(), limit)
+	if err != nil {
+		return err
+	}
+	if len(chunks) == 0 {
+		_, _ = fmt.Fprintf(os.Stdout, "no chunks for product %d under %s\n", productID, embedder.Model())
+		return nil
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(w, "INDEX\tSECTION\tHEADING\tTEXT")
+	for _, chunk := range chunks {
+		section := ""
+		if chunk.SectionCode != nil {
+			section = *chunk.SectionCode
+		}
+		heading := ""
+		if chunk.Heading != nil {
+			heading = *chunk.Heading
+		}
+		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\n", chunk.ChunkIndex, section, ragSnippet(heading, 32), ragSnippet(chunk.ChunkText, 80))
+	}
+	return w.Flush()
+}
+
+func ragCoverage(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) > 0 {
+		return fmt.Errorf("rag coverage takes no options")
+	}
+	embedder, err := rag.NewEmbedder(cfg.Embeddings)
+	if err != nil {
+		return err
+	}
+	pool, err := db.Open(cfg.Database)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	store := rag.NewStore(pool)
+	coverage, err := store.Coverage(ctx, embedder.Model())
+	if err != nil {
+		return err
+	}
+	chunks, err := store.CountChunks(ctx, embedder.Model())
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(os.Stdout, "model %s: %d chunks\n", embedder.Model(), chunks)
+	_, _ = fmt.Fprintf(os.Stdout, "products with a leaflet URL: %d\n", coverage.ProductsWithLeaflet)
+	_, _ = fmt.Fprintf(os.Stdout, "products with a readable leaflet: %d\n", coverage.ProductsWithReadableLeaflet)
+	_, _ = fmt.Fprintf(os.Stdout, "products indexed for this model: %d\n", coverage.ProductsIndexed)
+	_, _ = fmt.Fprintf(os.Stdout, "products needing OCR: %d\n", coverage.ProductsNeedingOcr)
+	return nil
+}
+
+func ragEval(ctx context.Context, cfg config.Config, args []string) error {
+	path := ""
+	k := rag.DefaultSearchLimit
+	minRecall := 0.0
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--file":
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("--file requires a path")
+			}
+			path = args[i]
+		case "--k":
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("--k requires a number")
+			}
+			value, err := strconv.Atoi(args[i])
+			if err != nil || value <= 0 {
+				return fmt.Errorf("--k must be a positive number")
+			}
+			k = value
+		case "--min-recall":
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("--min-recall requires a fraction")
+			}
+			value, err := strconv.ParseFloat(args[i], 64)
+			if err != nil || value < 0 || value > 1 {
+				return fmt.Errorf("--min-recall must be between 0 and 1")
+			}
+			minRecall = value
+		default:
+			return fmt.Errorf("unknown rag eval option %q", args[i])
+		}
+	}
+	if path == "" {
+		return fmt.Errorf("rag eval requires --file <yaml>")
+	}
+
+	set, err := rag.LoadEvalSet(path)
+	if err != nil {
+		return err
+	}
+	embedder, err := rag.NewEmbedder(cfg.Embeddings)
+	if err != nil {
+		return err
+	}
+	pool, err := db.Open(cfg.Database)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	store := rag.NewStore(pool)
+	report, err := rag.Evaluate(ctx, store, embedder, store, set, rag.EvalOptions{K: k})
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprint(os.Stdout, report.Summary())
+	if minRecall > 0 && report.Recall < minRecall {
+		return fmt.Errorf("recall %.1f%% is below the required %.1f%%", report.Recall*100, minRecall*100)
+	}
+	return nil
+}
+
+func ragSnippet(value string, limit int) string {
+	value = strings.Join(strings.Fields(value), " ")
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit-1] + "…"
 }
 
 func verdictCommand(ctx context.Context, cfg config.Config, args []string) error {

@@ -40,19 +40,20 @@ func (e Environment) Valid() bool {
 
 // Config is the fully parsed configuration for one process.
 type Config struct {
-	Env       Environment
-	LogLevel  string
-	HTTP      HTTP
-	Database  Database
-	Storage   Storage
-	Jobs      Jobs
-	Greenbook Greenbook
-	API       API
-	Scan      Scan
-	Vision    Vision
-	Verify    Verify
-	Safety    Safety
-	Verdict   Verdict
+	Env        Environment
+	LogLevel   string
+	HTTP       HTTP
+	Database   Database
+	Storage    Storage
+	Jobs       Jobs
+	Greenbook  Greenbook
+	API        API
+	Scan       Scan
+	Vision     Vision
+	Verify     Verify
+	Safety     Safety
+	Verdict    Verdict
+	Embeddings Embeddings
 }
 
 // HTTP holds the HTTP server settings.
@@ -155,6 +156,25 @@ type Safety struct {
 // embedded default.
 type Verdict struct {
 	ConfigFile string
+}
+
+// Embeddings holds the phase 08 retrieval settings. The provider decision is
+// still open, so "http" is a generic OpenAI-compatible client rather than a
+// vendor-specific integration, and "fake" is only for local development and
+// tests. Dimension must match the smpc_chunks column.
+type Embeddings struct {
+	Provider      string
+	BaseURL       string
+	APIKey        string
+	Model         string
+	Dimension     int
+	BatchSize     int
+	Timeout       time.Duration
+	BackfillLimit int
+	Delay         time.Duration
+	// IndexInterval schedules a worker indexing pass. Zero leaves it to the
+	// operator, which is the default until the provider decision is made.
+	IndexInterval time.Duration
 }
 
 // Scan holds upload and extraction limits.
@@ -282,6 +302,18 @@ func LoadFrom(environ []string) (Config, error) {
 		Verdict: Verdict{
 			ConfigFile: l.str("VERDICT_CONFIG_FILE", ""),
 		},
+		Embeddings: Embeddings{
+			Provider:      l.oneOf("EMBEDDINGS_PROVIDER", "fake", "fake", "http"),
+			BaseURL:       l.str("EMBEDDINGS_BASE_URL", ""),
+			APIKey:        l.str("EMBEDDINGS_API_KEY", ""),
+			Model:         l.str("EMBEDDINGS_MODEL", ""),
+			Dimension:     l.positiveInt("EMBEDDINGS_DIMENSION", 1024),
+			BatchSize:     l.positiveInt("EMBEDDINGS_BATCH_SIZE", 64),
+			Timeout:       l.duration("EMBEDDINGS_TIMEOUT", 30*time.Second),
+			BackfillLimit: l.positiveInt("EMBEDDINGS_BACKFILL_LIMIT", 50),
+			Delay:         l.duration("EMBEDDINGS_DELAY", 0),
+			IndexInterval: l.duration("EMBEDDINGS_INDEX_INTERVAL", 0),
+		},
 		Vision: Vision{
 			Provider:                l.oneOf("VISION_PROVIDER", "fake", "fake", "claude"),
 			Model:                   l.str("VISION_MODEL", ""),
@@ -350,7 +382,7 @@ func (c Config) LogLevelValue() slog.Level {
 // Secrets returns the configured secret values so they can be registered with
 // the log redactor. The slice is never logged directly.
 func (c Config) Secrets() []string {
-	secrets := []string{c.Storage.SecretKey, c.Storage.AccessKey, c.Vision.APIKey}
+	secrets := []string{c.Storage.SecretKey, c.Storage.AccessKey, c.Vision.APIKey, c.Embeddings.APIKey}
 	if password := databasePassword(c.Database.URL); password != "" {
 		secrets = append(secrets, password)
 	}

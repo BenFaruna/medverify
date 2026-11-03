@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/pgvector/pgvector-go"
 )
 
 type ApiClient struct {
@@ -129,6 +130,26 @@ type ScanResult struct {
 	VerdictConfidence   *string     `json:"verdict_confidence"`
 	VerdictRulesVersion *string     `json:"verdict_rules_version"`
 	Signals             []byte      `json:"signals"`
+}
+
+type SmpcChunk struct {
+	ID             int64           `json:"id"`
+	ProductID      int64           `json:"product_id"`
+	DocumentID     int64           `json:"document_id"`
+	SectionID      pgtype.Int8     `json:"section_id"`
+	SectionCode    *string         `json:"section_code"`
+	Heading        *string         `json:"heading"`
+	PageStart      *int32          `json:"page_start"`
+	ChunkIndex     int32           `json:"chunk_index"`
+	ChunkText      string          `json:"chunk_text"`
+	EmbeddingText  string          `json:"embedding_text"`
+	ChunkHash      string          `json:"chunk_hash"`
+	TokenCount     int32           `json:"token_count"`
+	Embedding      pgvector.Vector `json:"embedding"`
+	EmbeddingModel string          `json:"embedding_model"`
+	DocumentSha256 string          `json:"document_sha256"`
+	CreatedAt      time.Time       `json:"created_at"`
+	Tsv            interface{}     `json:"tsv"`
 }
 
 type SmpcDocument struct {

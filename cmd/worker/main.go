@@ -18,6 +18,7 @@ import (
 	"github.com/benfaruna/medverify/internal/platform/db"
 	"github.com/benfaruna/medverify/internal/platform/jobs"
 	"github.com/benfaruna/medverify/internal/platform/logging"
+	"github.com/benfaruna/medverify/internal/rag"
 	"github.com/benfaruna/medverify/internal/registry"
 	"github.com/benfaruna/medverify/internal/safety"
 	"github.com/benfaruna/medverify/internal/scan"
@@ -136,6 +137,22 @@ func run() error {
 	}
 	workerOpts = append(workerOpts, jobs.WithScanRunner(scanService))
 
+	// Leaflet indexing is wired even when it is not scheduled, so an operator
+	// can enqueue a pass explicitly. The default embeddings provider is the
+	// deterministic fake, which is safe locally but useless as a production
+	// index; the provider decision is still open.
+	embedder, err := rag.NewEmbedder(cfg.Embeddings)
+	if err != nil {
+		return err
+	}
+	workerOpts = append(workerOpts, jobs.WithRAGRunner(&leafletIndexer{
+		store:    rag.NewStore(pool),
+		embedder: embedder,
+		delay:    cfg.Embeddings.Delay,
+		logger:   logger,
+	}))
+	clientOpts = append(clientOpts, jobs.WithPeriodicJobs(jobs.RAGIndexPeriodicJob(cfg.Embeddings)))
+
 	client, err := jobs.NewClient(pool, logger, jobs.NewWorkers(logger, workerOpts...), cfg.Jobs, clientOpts...)
 	if err != nil {
 		return err
@@ -153,6 +170,9 @@ func run() error {
 		slog.String("verify_config_version", verifyConfig.Version),
 		slog.String("safety_config_version", safetyConfig.Version),
 		slog.String("verdict_config_version", rules.Version),
+		slog.String("embeddings_provider", cfg.Embeddings.Provider),
+		slog.String("embeddings_model", embedder.Model()),
+		slog.Int("embeddings_dimension", embedder.Dim()),
 	)
 
 	<-ctx.Done()
