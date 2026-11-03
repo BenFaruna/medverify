@@ -9,7 +9,7 @@ The system never says a medicine is safe, genuine, or authentic. See
 [docs/scoring-philosophy.md](docs/scoring-philosophy.md) and the product rules in
 [the build tracker](docs/phases/MedVerify%20NG%20-%2000%20Build%20Tracker%20and%20Engineering%20Conventions.md).
 
-Current state: **phase 5 (registry verification), in review**. Uploads are
+Current state: **phase 6 (ingredient safety checks), in review**. Uploads are
 validated, re-encoded to strip EXIF and GPS, stored privately, processed by a
 River job, and exposed through POST/GET /v1/scans. Each image goes through a
 configurable vision provider; the default is a deterministic fake, and
@@ -25,13 +25,29 @@ and stores a typed, explainable result in `scan_results.features`: one of
 reason codes, candidates, and dataset coverage. `not_found_in_dataset` means
 our copy has no match, never that a pack is fake.
 
+Phase 6 adds a curated watchlist with database-enforced provenance: an entry
+cannot exist without a source document (issuing body, URL, issue date), and
+`reviewed_by` is required. `admin watchlist import` loads a reviewed CSV
+atomically and idempotently; `list` and `deactivate` manage the rest. The worker
+runs a safety checker after verification and stores typed flags with a source
+snapshot: watchlist product or ingredient matches, undeclared or missing
+ingredients (only when the label's ingredient list was read with enough
+confidence), strength deviation, and expired or withdrawn registrations. Flag
+wording comes from a reviewed catalog keyed by reason code, not from generated
+text; the catalog is still marked draft pending a pharmacist. Matching rules and
+thresholds live in `config/safety-v1.yaml` (`SAFETY_CONFIG_FILE`). Nothing on
+the watchlist is added automatically: only the admin import writes entries, and
+the process is documented in
+[docs/watchlist-process.md](docs/watchlist-process.md).
+
 The phase 2 live-ingestion acceptance run, the consented 100+ photo extraction
 eval set, the live provider acceptance run, the data-handling decision, and the
 written NAFDAC data-sharing agreement are still open; see the
 [phase 2 notes](docs/phases/MedVerify%20NG%20-%2002%20Greenbook%20and%20Leaflet%20Ingestion.md#10-implementation-notes),
 the [phase 3 notes](docs/phases/MedVerify%20NG%20-%2003%20Scan%20Pipeline%20Skeleton.md#9-implementation-notes),
 the [phase 4 notes](docs/phases/MedVerify%20NG%20-%2004%20Label%20Extraction.md#9-implementation-notes),
-and the [phase 5 notes](docs/phases/MedVerify%20NG%20-%2005%20Registry%20Verification.md#11-blockers-and-open-items).
+the [phase 5 notes](docs/phases/MedVerify%20NG%20-%2005%20Registry%20Verification.md#11-blockers-and-open-items),
+and the [phase 6 notes](docs/phases/MedVerify%20NG%20-%2006%20Ingredient%20Safety%20Checks.md#11-blockers-and-open-items).
 
 ## Quickstart
 
