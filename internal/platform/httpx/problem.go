@@ -30,6 +30,7 @@ const (
 	CodeMethodNotAllowed  = "method_not_allowed"
 	CodeNotFound          = "not_found"
 	CodePayloadTooLarge   = "payload_too_large"
+	CodeRateLimited       = "rate_limited"
 	CodeTimeout           = "timeout"
 	CodeTooManyImages     = "too_many_images"
 	CodeUnauthorized      = "unauthorized"

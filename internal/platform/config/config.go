@@ -54,6 +54,7 @@ type Config struct {
 	Safety     Safety
 	Verdict    Verdict
 	Embeddings Embeddings
+	Assistant  Assistant
 }
 
 // HTTP holds the HTTP server settings.
@@ -175,6 +176,26 @@ type Embeddings struct {
 	// IndexInterval schedules a worker indexing pass. Zero leaves it to the
 	// operator, which is the default until the provider decision is made.
 	IndexInterval time.Duration
+}
+
+// Assistant holds the grounded Q&A settings. The router and verifier use the
+// small model; the orchestrator uses the strong model. Model identifiers are
+// pinned values supplied by the operator.
+type Assistant struct {
+	Provider         string
+	Model            string
+	SmallModel       string
+	APIKey           string
+	BaseURL          string
+	MaxTokens        int
+	Timeout          time.Duration
+	MaxSteps         int
+	MaxOutputTokens  int
+	MaxToolCalls     int
+	MaxTurns         int
+	ConversationTTL  time.Duration
+	MaxQuestionBytes int
+	Languages        []string
 }
 
 // Scan holds upload and extraction limits.
@@ -314,6 +335,22 @@ func LoadFrom(environ []string) (Config, error) {
 			Delay:         l.duration("EMBEDDINGS_DELAY", 0),
 			IndexInterval: l.duration("EMBEDDINGS_INDEX_INTERVAL", 0),
 		},
+		Assistant: Assistant{
+			Provider:         l.oneOf("ASSISTANT_LLM_PROVIDER", "fake", "fake", "claude"),
+			Model:            l.str("ASSISTANT_MODEL", ""),
+			SmallModel:       l.str("ASSISTANT_SMALL_MODEL", ""),
+			APIKey:           l.str("ASSISTANT_API_KEY", ""),
+			BaseURL:          l.str("ASSISTANT_BASE_URL", "https://api.anthropic.com"),
+			MaxTokens:        l.positiveInt("ASSISTANT_MAX_TOKENS", 1024),
+			Timeout:          l.duration("ASSISTANT_TIMEOUT", 30*time.Second),
+			MaxSteps:         l.positiveInt("ASSISTANT_MAX_STEPS", 4),
+			MaxOutputTokens:  l.positiveInt("ASSISTANT_MAX_OUTPUT_TOKENS", 4096),
+			MaxToolCalls:     l.positiveInt("ASSISTANT_MAX_TOOL_CALLS", 8),
+			MaxTurns:         l.positiveInt("ASSISTANT_MAX_TURNS", 6),
+			ConversationTTL:  l.duration("ASSISTANT_CONVERSATION_TTL", 24*time.Hour),
+			MaxQuestionBytes: l.positiveInt("ASSISTANT_MAX_QUESTION_BYTES", 1000),
+			Languages:        l.csv("ASSISTANT_LANGUAGES", "en"),
+		},
 		Vision: Vision{
 			Provider:                l.oneOf("VISION_PROVIDER", "fake", "fake", "claude"),
 			Model:                   l.str("VISION_MODEL", ""),
@@ -359,6 +396,25 @@ func LoadFrom(environ []string) (Config, error) {
 	}
 	l.validateHTTPURL("VISION_BASE_URL", cfg.Vision.BaseURL)
 
+	if cfg.Assistant.Provider == "claude" {
+		if cfg.Assistant.Model == "" {
+			l.add("ASSISTANT_MODEL", "is required when ASSISTANT_LLM_PROVIDER=claude; pin an exact model id")
+		}
+		if cfg.Assistant.SmallModel == "" {
+			l.add("ASSISTANT_SMALL_MODEL", "is required when ASSISTANT_LLM_PROVIDER=claude; pin an exact router/verifier model id")
+		}
+		if cfg.Assistant.APIKey == "" {
+			l.add("ASSISTANT_API_KEY", "is required when ASSISTANT_LLM_PROVIDER=claude")
+		}
+	}
+	if cfg.Env == EnvProduction && cfg.Assistant.Provider == "fake" {
+		l.add("ASSISTANT_LLM_PROVIDER", "must not be fake in production")
+	}
+	if len(cfg.Assistant.Languages) == 0 {
+		l.add("ASSISTANT_LANGUAGES", "must list at least one reviewed language")
+	}
+	l.validateHTTPURL("ASSISTANT_BASE_URL", cfg.Assistant.BaseURL)
+
 	if len(l.problems) > 0 {
 		return Config{}, &Error{Problems: l.problems}
 	}
@@ -382,7 +438,10 @@ func (c Config) LogLevelValue() slog.Level {
 // Secrets returns the configured secret values so they can be registered with
 // the log redactor. The slice is never logged directly.
 func (c Config) Secrets() []string {
-	secrets := []string{c.Storage.SecretKey, c.Storage.AccessKey, c.Vision.APIKey, c.Embeddings.APIKey}
+	secrets := []string{
+		c.Storage.SecretKey, c.Storage.AccessKey, c.Vision.APIKey,
+		c.Embeddings.APIKey, c.Assistant.APIKey,
+	}
 	if password := databasePassword(c.Database.URL); password != "" {
 		secrets = append(secrets, password)
 	}

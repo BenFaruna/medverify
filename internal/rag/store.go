@@ -373,6 +373,32 @@ func (s *Store) ChunksForProduct(ctx context.Context, productID int64, model str
 	})
 }
 
+// FindProductID returns the local product id for a registry source id or NRN.
+// found=false means the record is not present; an error means the lookup could
+// not run. The assistant uses this to pin retrieval without treating a database
+// outage as "no leaflet".
+func (s *Store) FindProductID(ctx context.Context, sourceID, nrn string) (int64, bool, error) {
+	sourceID = strings.TrimSpace(sourceID)
+	nrn = strings.TrimSpace(nrn)
+	if sourceID == "" && nrn == "" {
+		return 0, false, nil
+	}
+	row := s.pool.QueryRow(ctx, `
+		SELECT id FROM products
+		WHERE ($1 <> '' AND source_id = $1) OR ($2 <> '' AND nrn = $2)
+		ORDER BY id
+		LIMIT 1`, sourceID, nrn)
+	var id int64
+	err := row.Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return id, true, nil
+}
+
 // ResolveProduct turns an NRN, a source id, or a numeric product id into a
 // product id. Names are deliberately not matched: a typo must not silently
 // inspect a different medicine.

@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/benfaruna/medverify/internal/assistant"
 	"github.com/benfaruna/medverify/internal/platform/auth"
 	"github.com/benfaruna/medverify/internal/platform/httpx"
 	"github.com/benfaruna/medverify/internal/scan"
@@ -31,6 +32,7 @@ type Options struct {
 	MaxBodyBytes   int64
 	APIKey         string
 	Scan           *scan.HTTPHandler
+	Assistant      *assistant.HTTPHandler
 }
 
 // NewHandler builds the router: middleware, health endpoints, and the problem
@@ -68,6 +70,10 @@ func NewHandler(opts Options) http.Handler {
 			r.Use(auth.APIKey(opts.APIKey))
 			r.Post("/scans", opts.Scan.Create)
 			r.Get("/scans/{id}", opts.Scan.Get)
+			if opts.Assistant != nil {
+				r.Post("/scans/{id}/questions", opts.Assistant.Ask)
+				r.Get("/scans/{id}/conversation", opts.Assistant.Conversation)
+			}
 		})
 	}
 

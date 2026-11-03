@@ -265,8 +265,10 @@ func fallbackTurn(catalog Catalog, key, reason string) Turn {
 		return Turn{Verification: Verification{Reason: reason}, FallbackKey: key}
 	}
 	return Turn{
-		Text:         text,
-		Verification: Verification{Allowed: reason == "not_found", Reason: reason},
+		Text: text,
+		// A fixed fallback is safe but it is not a verified claim: no model
+		// answer passed the verifier for this turn.
+		Verification: Verification{Allowed: false, Reason: reason},
 		FallbackKey:  key,
 	}
 }

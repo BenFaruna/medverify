@@ -106,5 +106,67 @@ func optionalString(value string) *string {
 	return &value
 }
 
+// RecordChat writes one chat call. Prompt and answer text are never part of
+// the record.
+func (r *Recorder) RecordChat(ctx context.Context, call CallRecord) error {
+	if call.Provider == "" {
+		return fmt.Errorf("llm: chat call record requires a provider")
+	}
+
+	var scanID pgtype.UUID
+	if call.ScanID != "" {
+		id, err := uuid.Parse(call.ScanID)
+		if err != nil {
+			return fmt.Errorf("llm: invalid scan id in chat record: %w", err)
+		}
+		scanID = pgtype.UUID{Bytes: id, Valid: true}
+	}
+	model := call.Model
+	if model == "" {
+		model = "unknown"
+	}
+	version := call.PromptVersion
+	if version == "" {
+		version = "unknown"
+	}
+	latency := call.Latency.Milliseconds()
+	if latency < 0 {
+		latency = 0
+	}
+	if latency > math.MaxInt32 {
+		latency = math.MaxInt32
+	}
+	var cost pgtype.Numeric
+	if call.Usage.CostUSD > 0 {
+		cost = pgtype.Numeric{
+			Int:   big.NewInt(int64(math.Round(call.Usage.CostUSD * 1_000_000))),
+			Exp:   -6,
+			Valid: true,
+		}
+	}
+	outcome := call.Outcome
+	if outcome != "success" && outcome != "error" {
+		outcome = "error"
+	}
+	_, err := r.queries.InsertLLMCall(ctx, dbgen.InsertLLMCallParams{
+		ScanID:        scanID,
+		Provider:      call.Provider,
+		Model:         model,
+		PromptVersion: version,
+		Kind:          "chat",
+		LatencyMs:     int32(latency),
+		InputUnits:    optionalInt(call.Usage.InputTokens),
+		OutputUnits:   optionalInt(call.Usage.OutputTokens),
+		CostUsd:       cost,
+		Outcome:       outcome,
+		ErrorCode:     optionalString(call.ErrorCode),
+	})
+	if err != nil {
+		return fmt.Errorf("llm: insert chat record: %w", err)
+	}
+	return nil
+}
+
 // compile-time check that Recorder satisfies the provider seam.
 var _ vision.Recorder = (*Recorder)(nil)
+var _ ChatRecorder = (*Recorder)(nil)

@@ -12,16 +12,21 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
+	"github.com/benfaruna/medverify/internal/assistant"
+	"github.com/benfaruna/medverify/internal/llm"
 	"github.com/benfaruna/medverify/internal/platform/config"
 	"github.com/benfaruna/medverify/internal/platform/db"
 	"github.com/benfaruna/medverify/internal/platform/httpx"
 	"github.com/benfaruna/medverify/internal/platform/jobs"
 	"github.com/benfaruna/medverify/internal/platform/logging"
+	"github.com/benfaruna/medverify/internal/rag"
 	"github.com/benfaruna/medverify/internal/scan"
 	"github.com/benfaruna/medverify/internal/storage"
 	"github.com/benfaruna/medverify/internal/vision"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main() {
@@ -93,6 +98,11 @@ func run() error {
 		return err
 	}
 
+	assistantHandler, err := buildAssistant(cfg, pool, logger, scanService)
+	if err != nil {
+		return err
+	}
+
 	handler := NewHandler(Options{
 		Logger: logger,
 		Dependencies: []Dependency{
@@ -111,6 +121,7 @@ func run() error {
 			MaxRequestBytes: cfg.Scan.MaxRequestBytes,
 			SyncWait:        cfg.Scan.SyncWait,
 		}),
+		Assistant: assistantHandler,
 	})
 
 	server := httpx.NewServer(httpx.ServerOptions{
@@ -128,4 +139,123 @@ func run() error {
 	}
 	logger.Info("api stopped")
 	return nil
+}
+
+func buildAssistant(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, scans assistant.ScanSource) (*assistant.HTTPHandler, error) {
+	prompts, err := assistant.LoadPrompts(assistant.PromptVersion)
+	if err != nil {
+		return nil, err
+	}
+	catalogs := make(map[string]assistant.Catalog, len(cfg.Assistant.Languages))
+	for _, language := range cfg.Assistant.Languages {
+		catalog, err := assistant.LoadTemplates(language)
+		if err != nil {
+			return nil, fmt.Errorf("load assistant templates for %q: %w", language, err)
+		}
+		if cfg.Env == config.EnvProduction {
+			if err := catalog.ProductionReady(); err != nil {
+				return nil, err
+			}
+		} else if err := catalog.ProductionReady(); err != nil {
+			logger.Warn("assistant templates are not reviewed", slog.String("language", language), slog.Any("err", err))
+		}
+		catalogs[strings.ToLower(language)] = catalog
+	}
+
+	strongModel := cfg.Assistant.Model
+	smallModel := cfg.Assistant.SmallModel
+	if smallModel == "" {
+		smallModel = strongModel
+	}
+	if strongModel == "" {
+		strongModel = "fake-chat-v1"
+	}
+	if smallModel == "" {
+		smallModel = "fake-chat-v1"
+	}
+
+	strong, err := newChatClient(cfg, strongModel)
+	if err != nil {
+		return nil, err
+	}
+	small, err := newChatClient(cfg, smallModel)
+	if err != nil {
+		return nil, err
+	}
+	recorder := llm.NewRecorder(pool)
+	strong = llm.NewRecordingClient(strong, recorder, "", cfg.Assistant.Provider, strongModel)
+	small = llm.NewRecordingClient(small, recorder, "", cfg.Assistant.Provider, smallModel)
+
+	embedder, err := rag.NewEmbedder(cfg.Embeddings)
+	if err != nil {
+		return nil, err
+	}
+	ragStore := rag.NewStore(pool)
+	searcher := ragSearcher{store: ragStore, embedder: embedder}
+
+	router := assistant.NewRouter(small, prompts.Router, cfg.Assistant.Languages)
+	verifier := assistant.NewVerifier(small, prompts.Verifier)
+	limits := assistant.Limits{
+		MaxSteps: cfg.Assistant.MaxSteps, MaxOutputTokens: cfg.Assistant.MaxOutputTokens,
+		MaxToolCalls: cfg.Assistant.MaxToolCalls,
+	}
+	orchestrator := &assistant.Orchestrator{
+		Client: strong, Tools: assistant.NewToolbox(searcher), Verifier: verifier,
+		Prompts: prompts, Limits: limits,
+	}
+
+	service, err := assistant.NewService(assistant.ServiceOptions{
+		Store:            assistant.NewStore(pool),
+		Scans:            scans,
+		Resolver:         ragStore,
+		Searcher:         searcher,
+		Prompts:          prompts,
+		Router:           router,
+		Verifier:         verifier,
+		Orchestra:        orchestrator,
+		Catalogs:         catalogs,
+		Languages:        cfg.Assistant.Languages,
+		Limits:           limits,
+		ConversationTTL:  cfg.Assistant.ConversationTTL,
+		MaxTurns:         cfg.Assistant.MaxTurns,
+		MaxQuestionBytes: cfg.Assistant.MaxQuestionBytes,
+		Logger:           logger,
+	})
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("assistant configured",
+		slog.String("provider", cfg.Assistant.Provider),
+		slog.String("model", strongModel),
+		slog.String("small_model", smallModel),
+		slog.Any("languages", cfg.Assistant.Languages),
+		slog.String("embeddings_model", embedder.Model()),
+	)
+	return assistant.NewHTTPHandler(assistant.HTTPOptions{
+		Service: service, Logger: logger, MaxBodyBytes: int64(cfg.Assistant.MaxQuestionBytes) + 512,
+	}), nil
+}
+
+func newChatClient(cfg config.Config, model string) (llm.Client, error) {
+	switch cfg.Assistant.Provider {
+	case "fake":
+		return llm.NewFake(), nil
+	case "claude":
+		return llm.NewClaude(llm.ClaudeOptions{
+			APIKey: cfg.Assistant.APIKey, BaseURL: cfg.Assistant.BaseURL, Model: model,
+			MaxTokens: cfg.Assistant.MaxTokens, Timeout: cfg.Assistant.Timeout,
+		})
+	default:
+		return nil, fmt.Errorf("assistant: unknown provider %q", cfg.Assistant.Provider)
+	}
+}
+
+// ragSearcher binds the phase 08 embedder to assistant's searcher interface.
+type ragSearcher struct {
+	store    *rag.Store
+	embedder rag.Embedder
+}
+
+func (s ragSearcher) Search(ctx context.Context, request rag.SearchRequest) ([]rag.Hit, error) {
+	return s.store.Search(ctx, s.embedder, request)
 }

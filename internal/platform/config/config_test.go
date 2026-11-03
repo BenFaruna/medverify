@@ -55,6 +55,11 @@ func TestLoadFromValidEnvironment(t *testing.T) {
 	assert.Equal(t, 3.0, cfg.Vision.InputPricePerMToken)
 	assert.Equal(t, 15.0, cfg.Vision.OutputPricePerMToken)
 
+	assert.Equal(t, "fake", cfg.Assistant.Provider)
+	assert.Equal(t, 4, cfg.Assistant.MaxSteps)
+	assert.Equal(t, 6, cfg.Assistant.MaxTurns)
+	assert.Equal(t, []string{"en"}, cfg.Assistant.Languages)
+
 	assert.True(t, cfg.Greenbook.Enabled)
 	assert.Equal(t, "https://greenbook.nafdac.gov.ng", cfg.Greenbook.BaseURL)
 	assert.Equal(t, 1.0, cfg.Greenbook.RequestsPerSecond)
@@ -98,6 +103,10 @@ func TestLoadFromOverridesDefaults(t *testing.T) {
 		"VISION_PROVIDER=claude",
 		"VISION_MODEL=claude-sonnet-4-5-20250929",
 		"VISION_API_KEY=test-vision-key",
+		"ASSISTANT_LLM_PROVIDER=claude",
+		"ASSISTANT_MODEL=claude-sonnet-4-5-20250929",
+		"ASSISTANT_SMALL_MODEL=claude-haiku-4-5-20251001",
+		"ASSISTANT_API_KEY=test-assistant-key",
 	)
 
 	cfg, err := config.LoadFrom(env)
@@ -116,6 +125,10 @@ func TestLoadFromOverridesDefaults(t *testing.T) {
 	assert.Equal(t, "claude", cfg.Vision.Provider)
 	assert.Equal(t, "claude-sonnet-4-5-20250929", cfg.Vision.Model)
 	assert.Contains(t, cfg.Secrets(), "test-vision-key")
+	assert.Contains(t, cfg.Secrets(), "test-assistant-key")
+	assert.Equal(t, "claude", cfg.Assistant.Provider)
+	assert.Equal(t, "claude-sonnet-4-5-20250929", cfg.Assistant.Model)
+	assert.Equal(t, "claude-haiku-4-5-20251001", cfg.Assistant.SmallModel)
 
 	assert.False(t, cfg.Greenbook.Enabled)
 	assert.Equal(t, "http://localhost:9001", cfg.Greenbook.BaseURL)
@@ -259,4 +272,30 @@ func TestEnvironmentValid(t *testing.T) {
 	assert.True(t, config.EnvTest.Valid())
 	assert.True(t, config.EnvProduction.Valid())
 	assert.False(t, config.Environment("staging").Valid())
+}
+
+func TestProductionRejectsTheFakeAssistantProvider(t *testing.T) {
+	t.Parallel()
+	env := append(baseEnv(),
+		"APP_ENV=production",
+		"API_KEY=production-key",
+		"VISION_PROVIDER=claude",
+		"VISION_MODEL=claude-sonnet-4-5-20250929",
+		"VISION_API_KEY=test-vision-key",
+	)
+	_, err := config.LoadFrom(env)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ASSISTANT_LLM_PROVIDER")
+}
+
+func TestClaudeAssistantRequiresPinnedModels(t *testing.T) {
+	t.Parallel()
+	env := append(baseEnv(),
+		"ASSISTANT_LLM_PROVIDER=claude",
+		"ASSISTANT_API_KEY=test-key",
+	)
+	_, err := config.LoadFrom(env)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ASSISTANT_MODEL")
+	assert.Contains(t, err.Error(), "ASSISTANT_SMALL_MODEL")
 }
