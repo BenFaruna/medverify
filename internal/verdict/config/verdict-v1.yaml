@@ -1,0 +1,55 @@
+version: verdict-v1
+
+# STATUS: proposed. The phase 07 checklist requires the project lead and a
+# pharmacist to sign off the verdict meanings, the scenario table, and these
+# numbers before release. No test in this repository treats this file as
+# clinically approved.
+#
+# Score bands. Every verdict owns a closed range of the 0-100 concern score.
+# Bands are ordered and never overlap, so sorting by score can never rank a
+# flagged result below a consistent one. The score is for sorting and
+# analytics; it is never shown as a probability.
+bands:
+  consistent_with_records:
+    min: 0
+    max: 24
+  needs_review:
+    min: 25
+    max: 54
+  not_found_in_records:
+    min: 55
+    max: 64
+  mismatch_found:
+    min: 65
+    max: 84
+  flagged:
+    min: 85
+    max: 99
+  unreadable:
+    min: 100
+    max: 100
+
+# Readability gate. Below this mean extraction confidence the evaluator returns
+# unreadable before it looks at the match at all. A bad photo must not become a
+# guess.
+gate:
+  min_extraction_confidence: 0.50
+
+# Concern points added inside a verdict's band. They change the order of
+# results, not the verdict. Weights are capped at 40 by validation.
+weights:
+  field_mismatch: 8
+  unknown_field: 2
+  label_expired: 8
+  medium_flag: 10
+  low_flag: 4
+  thin_match: 6
+
+# Coarse confidence levels. Extraction confidence is capped by match strength,
+# so a confident read of a weak candidate is still low confidence.
+confidence:
+  medium_extraction: 0.60
+  high_extraction: 0.85
+
+limits:
+  max_reasons: 8

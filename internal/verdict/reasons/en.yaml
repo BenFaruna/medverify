@@ -1,0 +1,22 @@
+version: reasons-v1
+language: en
+
+# STATUS: draft. The phase 07 checklist requires a pharmacist and the project
+# lead to approve these sentences before release. They explain a verdict using
+# only what was compared; none of them is a safety, authenticity, or harm
+# claim. Tests reject the forbidden words listed in the phase document.
+#
+# Placeholders in braces are filled from Reason.Params.
+templates:
+  insufficient_label_data: "The photo did not show enough readable information to compare with NAFDAC records."
+  low_confidence: "The text was read with low confidence, so no comparison was attempted."
+  safety_flag: "A safety check raised a finding; the flags on this result give its source."
+  field_mismatch: "A printed detail does not agree with the NAFDAC record found for this pack."
+  label_expired: "The expiry date printed on the pack has passed."
+  not_in_dataset: "No NAFDAC record in our dataset matches this label. The dataset may be incomplete, so this result does not settle the pack's registration status."
+  dataset_empty: "The NAFDAC dataset is empty, so no comparison was possible."
+  candidate_only: "One possible record was found, but the NRN was not readable, so this is not a confirmed match."
+  ambiguous_candidates: "More than one record could match, so no single record was chosen."
+  outcome_unrecognized: "The comparison did not finish with a recognised outcome, so this result needs review."
+  unknown_fields: "Some details could not be read and were not compared: {fields}."
+  label_consistent: "The printed details agree with the NAFDAC record found for this pack."

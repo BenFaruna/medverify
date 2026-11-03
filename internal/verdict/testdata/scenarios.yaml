@@ -1,0 +1,310 @@
+version: scenarios-v1
+status: draft
+
+# The phase 07 specification table. Each row is a human-readable case: inputs
+# and the verdict we intend. STATUS: draft. The phase checklist requires the
+# project lead and a pharmacist to sign off this table before the weights are
+# treated as settled. Until then it documents the rules' intended behaviour,
+# not an approved clinical policy.
+#
+# Defaults when a case omits them: identified=true, confidence=0.90,
+# dataset_products=12000, no flags, not expired.
+#
+# `expect.reasons` lists codes that must be present; `expect.reason_order`
+# additionally fixes their order. `expect.score_min` / `score_max` pin points
+# where the band alone is not specific enough.
+cases:
+  - name: exact NRN with every field agreeing
+    outcome: matched_consistent
+    fields: {nrn: agree, name: agree, manufacturer: agree, ingredients: agree, strength: agree, expiry: agree}
+    expect: {verdict: consistent_with_records, confidence: high, reasons: [label_consistent]}
+
+  - name: name and manufacturer agree but the NRN was not readable
+    outcome: matched_consistent
+    fields: {nrn: unknown, name: agree, manufacturer: agree}
+    expect: {verdict: consistent_with_records, confidence: high, reasons: [label_consistent, unknown_fields], score_max: 24}
+
+  - name: expiry date was not readable
+    outcome: matched_consistent
+    fields: {nrn: agree, name: agree, expiry: unknown}
+    expect: {verdict: consistent_with_records, confidence: high, reasons: [unknown_fields]}
+
+  - name: extraction confidence exactly at the gate
+    outcome: matched_consistent
+    extraction: {confidence: 0.50}
+    fields: {nrn: agree, name: agree}
+    expect: {verdict: consistent_with_records, confidence: low}
+
+  - name: extraction confidence one hundredth below the gate
+    outcome: matched_consistent
+    extraction: {confidence: 0.49}
+    fields: {nrn: agree, name: agree}
+    expect: {verdict: unreadable, confidence: low, reasons: [low_confidence]}
+
+  - name: no key field was identified
+    outcome: matched_consistent
+    extraction: {confidence: 0.95, identified: false}
+    expect: {verdict: unreadable, confidence: low, reasons: [insufficient_label_data]}
+
+  - name: identified but several fields missing
+    outcome: matched_consistent
+    extraction: {missing: [batch_no, expiry]}
+    fields: {nrn: agree, name: agree}
+    expect: {verdict: consistent_with_records, confidence: high, reasons: [unknown_fields]}
+
+  - name: low severity flag on an otherwise consistent match
+    outcome: matched_consistent
+    fields: {nrn: agree, name: agree}
+    flags:
+      - {type: strength_deviation, severity: low, reason_code: strength_deviation}
+    expect: {verdict: needs_review, confidence: high, reasons: [safety_flag], score_min: 25}
+
+  - name: medium strength deviation on a consistent match
+    outcome: matched_consistent
+    fields: {nrn: agree, name: agree}
+    flags:
+      - {type: strength_deviation, severity: medium, reason_code: strength_deviation}
+    expect: {verdict: mismatch_found, confidence: high, reasons: [safety_flag], score_min: 75}
+
+  - name: printed expiry has passed
+    outcome: matched_consistent
+    fields: {nrn: agree, name: agree, expiry: agree}
+    label_expired: true
+    expect: {verdict: needs_review, confidence: high, reasons: [label_expired]}
+
+  - name: one plausible candidate and no readable NRN
+    outcome: candidate_only
+    fields: {nrn: unknown, name: agree}
+    expect: {verdict: needs_review, confidence: low, reasons: [candidate_only]}
+
+  - name: one plausible candidate from a weak photo
+    outcome: candidate_only
+    extraction: {confidence: 0.55}
+    expect: {verdict: needs_review, confidence: low, reasons: [candidate_only]}
+
+  - name: two plausible candidates
+    outcome: ambiguous
+    fields: {name: agree}
+    expect: {verdict: needs_review, confidence: low, reasons: [ambiguous_candidates]}
+
+  - name: three plausible candidates
+    outcome: ambiguous
+    fields: {name: agree}
+    expect: {verdict: needs_review, confidence: low, reasons: [ambiguous_candidates]}
+
+  - name: nothing matches in a populated dataset
+    outcome: not_found_in_dataset
+    fields: {nrn: agree, name: agree}
+    expect: {verdict: not_found_in_records, confidence: medium, reasons: [not_in_dataset]}
+
+  - name: nothing matches because the dataset is empty
+    outcome: not_found_in_dataset
+    dataset_products: 0
+    fields: {nrn: agree, name: agree}
+    expect: {verdict: not_found_in_records, confidence: medium, reasons: [not_in_dataset, dataset_empty]}
+
+  - name: nothing matches from a low confidence read
+    outcome: not_found_in_dataset
+    extraction: {confidence: 0.55}
+    fields: {nrn: agree}
+    expect: {verdict: not_found_in_records, confidence: low, reasons: [not_in_dataset]}
+
+  - name: the matcher could not use the label
+    outcome: unreadable_input
+    fields: {}
+    expect: {verdict: unreadable, confidence: low, reasons: [insufficient_label_data]}
+
+  - name: the matcher could not use an unidentified label
+    outcome: unreadable_input
+    extraction: {identified: false}
+    expect: {verdict: unreadable, confidence: low, reasons: [insufficient_label_data]}
+
+  - name: high severity watchlist alert on an exact match
+    outcome: matched_consistent
+    fields: {nrn: agree, name: agree, manufacturer: agree}
+    flags:
+      - {type: watchlist_product, severity: high, reason_code: watchlist_alert}
+    expect: {verdict: flagged, confidence: high, reasons: [safety_flag], score_min: 85}
+
+  - name: high severity registration problem
+    outcome: matched_consistent
+    fields: {nrn: agree, name: agree, registry_status: disagree}
+    flags:
+      - {type: registration_problem, severity: high, reason_code: registry_expired}
+    expect: {verdict: flagged, confidence: high, reasons: [safety_flag, field_mismatch]}
+
+  - name: high severity ingredient alert
+    outcome: matched_with_mismatch
+    fields: {nrn: agree, ingredients: disagree}
+    flags:
+      - {type: watchlist_ingredient, severity: high, reason_code: watchlist_banned_ingredient}
+    expect: {verdict: flagged, confidence: high, reasons: [safety_flag, field_mismatch]}
+
+  - name: high, medium, and low flags together
+    outcome: matched_with_mismatch
+    fields: {nrn: agree, name: agree}
+    flags:
+      - {type: watchlist_product, severity: high, reason_code: watchlist_alert}
+      - {type: undeclared_ingredient, severity: medium, reason_code: undeclared_ingredient}
+      - {type: strength_deviation, severity: low, reason_code: strength_deviation}
+    expect: {verdict: flagged, confidence: high, reasons: [safety_flag], score_max: 99}
+
+  - name: high severity flag without a registry match
+    outcome: not_found_in_dataset
+    fields: {nrn: agree}
+    flags:
+      - {type: watchlist_product, severity: high, reason_code: watchlist_alert}
+    expect: {verdict: flagged, confidence: medium, reasons: [safety_flag, not_in_dataset]}
+
+  - name: high severity flag on an unreadable photo
+    outcome: matched_consistent
+    extraction: {confidence: 0.40}
+    fields: {nrn: agree}
+    flags:
+      - {type: watchlist_product, severity: high, reason_code: watchlist_alert}
+    expect: {verdict: unreadable, confidence: low, reasons: [low_confidence]}
+
+  - name: medium undeclared ingredient with a registered match
+    outcome: matched_with_mismatch
+    fields: {nrn: agree, ingredients: disagree}
+    flags:
+      - {type: undeclared_ingredient, severity: medium, reason_code: undeclared_ingredient}
+    expect: {verdict: mismatch_found, confidence: high, reasons: [safety_flag, field_mismatch]}
+
+  - name: medium missing ingredient with a registered match
+    outcome: matched_with_mismatch
+    fields: {nrn: agree, ingredients: disagree}
+    flags:
+      - {type: missing_ingredient, severity: medium, reason_code: missing_ingredient}
+    expect: {verdict: mismatch_found, confidence: high, reasons: [safety_flag]}
+
+  - name: low severity flag on a mismatch
+    outcome: matched_with_mismatch
+    fields: {nrn: agree, name: disagree}
+    flags:
+      - {type: strength_deviation, severity: low, reason_code: strength_deviation}
+    expect: {verdict: mismatch_found, confidence: high, reasons: [safety_flag, field_mismatch]}
+
+  - name: one printed field disagrees
+    outcome: matched_with_mismatch
+    fields: {nrn: agree, name: disagree}
+    expect: {verdict: mismatch_found, confidence: high, reasons: [field_mismatch], score_min: 65}
+
+  - name: two printed fields disagree
+    outcome: matched_with_mismatch
+    fields: {nrn: agree, name: disagree, manufacturer: disagree}
+    expect: {verdict: mismatch_found, confidence: high, reasons: [field_mismatch], score_min: 81}
+
+  - name: mismatch recorded without a disagreeing field
+    outcome: matched_with_mismatch
+    fields: {nrn: agree, name: agree}
+    expect: {verdict: mismatch_found, confidence: high, score_max: 65}
+
+  - name: printed expiry has passed and a field disagrees
+    outcome: matched_with_mismatch
+    fields: {nrn: agree, expiry: disagree}
+    label_expired: true
+    expect: {verdict: mismatch_found, confidence: high, reasons: [field_mismatch, label_expired]}
+
+  - name: mismatch with three unreadable fields
+    outcome: matched_with_mismatch
+    fields: {nrn: agree, name: disagree, batch_no: unknown, expiry: unknown, manufacturer: unknown}
+    expect: {verdict: mismatch_found, confidence: high, reasons: [field_mismatch, unknown_fields], score_min: 79}
+
+  - name: extraction confidence exactly at the medium level
+    outcome: matched_consistent
+    extraction: {confidence: 0.60}
+    fields: {nrn: agree, name: agree}
+    expect: {verdict: consistent_with_records, confidence: medium}
+
+  - name: extraction confidence exactly at the high level
+    outcome: matched_consistent
+    extraction: {confidence: 0.85}
+    fields: {nrn: agree, name: agree}
+    expect: {verdict: consistent_with_records, confidence: high}
+
+  - name: extraction confidence just below the medium level
+    outcome: matched_consistent
+    extraction: {confidence: 0.59}
+    fields: {nrn: agree, name: agree}
+    expect: {verdict: consistent_with_records, confidence: low}
+
+  - name: every optional field unreadable
+    outcome: matched_consistent
+    extraction: {missing: [batch_no, expiry, mfg_date, nrn, product_name, manufacturer, ingredients, strength, registry_status, qr, pack_size, dosage_form, barcode]}
+    fields: {nrn: agree, name: agree}
+    expect: {verdict: consistent_with_records, confidence: high, reasons: [unknown_fields], score_max: 24}
+
+  - name: not found with a medium flag cannot exceed its band
+    outcome: not_found_in_dataset
+    fields: {nrn: agree}
+    flags:
+      - {type: undeclared_ingredient, severity: medium, reason_code: undeclared_ingredient}
+    expect: {verdict: not_found_in_records, confidence: medium, reasons: [safety_flag], score_max: 64}
+
+  - name: flagged results stay below the unreadable score
+    outcome: matched_with_mismatch
+    fields: {nrn: agree}
+    flags:
+      - {type: watchlist_product, severity: high, reason_code: watchlist_alert}
+    expect: {verdict: flagged, confidence: high, score_max: 99}
+
+  - name: an empty outcome needs review
+    outcome: ""
+    fields: {nrn: agree}
+    expect: {verdict: needs_review, confidence: low, reasons: [outcome_unrecognized]}
+
+  - name: an unrecognised outcome needs review
+    outcome: something_else
+    fields: {nrn: agree}
+    expect: {verdict: needs_review, confidence: low, reasons: [outcome_unrecognized]}
+
+  - name: high flag with two field mismatches orders reasons deterministically
+    outcome: matched_with_mismatch
+    fields: {nrn: disagree, name: disagree}
+    flags:
+      - {type: watchlist_product, severity: high, reason_code: watchlist_alert}
+    expect:
+      verdict: flagged
+      confidence: high
+      reason_order: [safety_flag, field_mismatch, field_mismatch]
+
+  - name: not found with an empty dataset and missing fields
+    outcome: not_found_in_dataset
+    dataset_products: 0
+    fields: {nrn: agree}
+    extraction: {missing: [batch_no]}
+    expect: {verdict: not_found_in_records, confidence: medium, reasons: [not_in_dataset, dataset_empty, unknown_fields]}
+
+  - name: unrecognised outcome from a weak photo is unreadable
+    outcome: something_else
+    extraction: {confidence: 0.49}
+    fields: {nrn: agree}
+    expect: {verdict: unreadable, confidence: low, reasons: [low_confidence]}
+
+  - name: high flag on an expired consistent match
+    outcome: matched_consistent
+    fields: {nrn: agree, name: agree, expiry: agree}
+    label_expired: true
+    flags:
+      - {type: watchlist_product, severity: high, reason_code: watchlist_withdrawal}
+    expect: {verdict: flagged, confidence: high, reasons: [safety_flag, label_expired]}
+
+  - name: candidate only from a low confidence read
+    outcome: candidate_only
+    extraction: {confidence: 0.55}
+    fields: {name: agree}
+    expect: {verdict: needs_review, confidence: low, reasons: [candidate_only]}
+
+  - name: not found from a high confidence read
+    outcome: not_found_in_dataset
+    extraction: {confidence: 0.95}
+    fields: {nrn: agree, name: agree}
+    expect: {verdict: not_found_in_records, confidence: medium, reasons: [not_in_dataset]}
+
+  - name: low flag with missing fields on a consistent match
+    outcome: matched_consistent
+    fields: {nrn: agree, name: agree, expiry: unknown}
+    flags:
+      - {type: strength_deviation, severity: low, reason_code: strength_deviation}
+    expect: {verdict: needs_review, confidence: high, reasons: [safety_flag, unknown_fields]}
