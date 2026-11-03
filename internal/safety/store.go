@@ -117,6 +117,10 @@ func (s *Store) Import(ctx context.Context, entries []ImportEntry) (ImportSummar
 type ProductQuery struct {
 	NRN      string
 	NameNorm string
+	// MinScore is the minimum trigram similarity for a name candidate. The
+	// checker passes its configured threshold so the database does not sort
+	// entries the checker would discard.
+	MinScore float64
 	Limit    int
 	Now      time.Time
 }
@@ -145,8 +149,15 @@ func (s *Store) ProductEntries(ctx context.Context, query ProductQuery) ([]Entry
 	}
 
 	if query.NameNorm != "" {
+		// A caller that does not supply a threshold gets the pg_trgm default,
+		// so an unset field cannot silently accept every candidate.
+		minScore := query.MinScore
+		if minScore <= 0 {
+			minScore = 0.3
+		}
 		rows, err := s.queries.SearchLiveWatchlistEntriesByName(ctx, dbgen.SearchLiveWatchlistEntriesByNameParams{
 			Query:    query.NameNorm,
+			MinScore: minScore,
 			Today:    &today,
 			RowLimit: int32(query.Limit),
 		})

@@ -9,9 +9,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/benfaruna/medverify/internal/platform/db/dbgen"
+	"github.com/benfaruna/medverify/internal/safety"
 )
 
 // ErrScanNotFound is returned when a scan ID does not exist.
@@ -133,6 +135,30 @@ func (s *Store) GetScan(ctx context.Context, id uuid.UUID) (Scan, error) {
 		result := resultFromRow(resultRow)
 		scan.Result = &result
 	}
+
+	flagRows, err := s.queries.ListSafetyFlagsForScan(ctx, id)
+	if err != nil {
+		return Scan{}, fmt.Errorf("load safety flags %s: %w", id, err)
+	}
+	scan.Flags = make([]safety.Flag, 0, len(flagRows))
+	for _, flagRow := range flagRows {
+		flag := safety.Flag{
+			Type:       safety.FlagType(flagRow.FlagType),
+			Severity:   safety.Severity(flagRow.Severity),
+			ReasonCode: flagRow.ReasonCode,
+		}
+		if len(flagRow.Evidence) > 0 {
+			if err := json.Unmarshal(flagRow.Evidence, &flag.Evidence); err != nil {
+				return Scan{}, fmt.Errorf("decode safety flag evidence for scan %s: %w", id, err)
+			}
+		}
+		if len(flagRow.Source) > 0 {
+			if err := json.Unmarshal(flagRow.Source, &flag.Source); err != nil {
+				return Scan{}, fmt.Errorf("decode safety flag source for scan %s: %w", id, err)
+			}
+		}
+		scan.Flags = append(scan.Flags, flag)
+	}
 	return scan, nil
 }
 
@@ -198,6 +224,37 @@ func (s *Store) FinishScan(ctx context.Context, id uuid.UUID, status Status, res
 		Error:     optional(result.Error),
 	}); err != nil {
 		return false, fmt.Errorf("store result for scan %s: %w", id, err)
+	}
+
+	// Flags are replaced with the result so a retried scan cannot leave stale
+	// findings from an earlier attempt.
+	if err := q.DeleteSafetyFlagsForScan(ctx, id); err != nil {
+		return false, fmt.Errorf("clear safety flags for scan %s: %w", id, err)
+	}
+	for _, flag := range result.Flags {
+		evidence, err := json.Marshal(flag.Evidence)
+		if err != nil {
+			return false, fmt.Errorf("encode flag evidence for scan %s: %w", id, err)
+		}
+		source, err := json.Marshal(flag.Source)
+		if err != nil {
+			return false, fmt.Errorf("encode flag source for scan %s: %w", id, err)
+		}
+		entryID := pgtype.Int8{}
+		if flag.Source.WatchlistEntryID > 0 {
+			entryID = pgtype.Int8{Int64: flag.Source.WatchlistEntryID, Valid: true}
+		}
+		if err := q.InsertSafetyFlag(ctx, dbgen.InsertSafetyFlagParams{
+			ScanID:           id,
+			FlagType:         string(flag.Type),
+			Severity:         string(flag.Severity),
+			ReasonCode:       flag.ReasonCode,
+			Evidence:         evidence,
+			Source:           source,
+			WatchlistEntryID: entryID,
+		}); err != nil {
+			return false, fmt.Errorf("store safety flag for scan %s: %w", id, err)
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {

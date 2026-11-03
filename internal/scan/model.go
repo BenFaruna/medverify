@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/benfaruna/medverify/internal/safety"
 )
 
 // Status is the lifecycle state of a scan. The database CHECK constraint and
@@ -80,12 +82,14 @@ type Image struct {
 }
 
 // Result is the stored result row. Verdict stays nil until phase 07; Extracted
-// carries validated label data and Features carries registry verification.
+// carries validated label data, Features carries registry verification, and
+// Flags carries the sourced safety findings from phase 06.
 type Result struct {
 	Verdict   json.RawMessage
 	Reasons   json.RawMessage
 	Extracted json.RawMessage
 	Features  json.RawMessage
+	Flags     []safety.Flag
 	Provider  string
 	Error     string
 }
@@ -102,6 +106,7 @@ type Scan struct {
 	CompletedAt  *time.Time
 	Images       []Image
 	Result       *Result
+	Flags        []safety.Flag
 }
 
 // View is the API response shape. Field names are stable for clients.
@@ -112,6 +117,7 @@ type View struct {
 	Reasons     json.RawMessage `json:"reasons"`
 	Extracted   json.RawMessage `json:"extracted"`
 	Features    json.RawMessage `json:"features"`
+	Flags       json.RawMessage `json:"flags"`
 	CreatedAt   time.Time       `json:"created_at"`
 	CompletedAt *time.Time      `json:"completed_at"`
 }
@@ -126,8 +132,12 @@ func (s Scan) View() View {
 		Reasons:     json.RawMessage("[]"),
 		Extracted:   nil,
 		Features:    nil,
+		Flags:       json.RawMessage("[]"),
 		CreatedAt:   s.CreatedAt,
 		CompletedAt: s.CompletedAt,
+	}
+	if encoded, err := json.Marshal(s.Flags); err == nil && len(s.Flags) > 0 {
+		view.Flags = encoded
 	}
 	if s.Result == nil {
 		return view

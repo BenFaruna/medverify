@@ -268,7 +268,7 @@ components:
             storage: ok
     Scan:
       type: object
-      required: [id, status, verdict, reasons, extracted, created_at]
+      required: [id, status, verdict, reasons, extracted, flags, created_at]
       properties:
         id:
           type: string
@@ -307,6 +307,14 @@ components:
             ran or when the scan has no result. `dataset` records how much data
             the answer was based on, so `not_found_in_dataset` is never read as
             proof that a pack is fake.
+        flags:
+          type: array
+          description: |
+            Sourced safety findings from phase 06. Empty when nothing matched
+            and nothing disagreed. A flag cites the document or registry record
+            it came from; it is never a safety or authenticity claim.
+          items:
+            $ref: "#/components/schemas/SafetyFlag"
         created_at:
           type: string
           format: date-time
@@ -319,6 +327,7 @@ components:
         status: completed
         verdict: null
         reasons: []
+        flags: []
         features:
           outcome: matched_consistent
           product:
@@ -456,6 +465,85 @@ components:
           enum: [day, month]
         raw:
           type: string
+    SafetyFlag:
+      type: object
+      required: [type, severity, reason_code, source]
+      description: |
+        One sourced finding. A flag reports a match against a cited document, or
+        a printed value that differs from the registered record. It never says a
+        medicine is safe, harmful, fake, or counterfeit.
+      properties:
+        type:
+          type: string
+          enum:
+            - watchlist_product
+            - watchlist_ingredient
+            - undeclared_ingredient
+            - missing_ingredient
+            - strength_deviation
+            - registration_problem
+        severity:
+          type: string
+          enum: [high, medium, low]
+          description: Feeds the phase 07 verdict engine; never a health claim.
+        reason_code:
+          type: string
+          description: |
+            Stable code. The reviewed wording catalog maps it to a sentence; a
+            client must not parse free text.
+          enum:
+            - watchlist_alert
+            - watchlist_withdrawal
+            - watchlist_banned_ingredient
+            - watchlist_restricted_ingredient
+            - undeclared_ingredient
+            - missing_ingredient
+            - strength_deviation
+            - registry_expired
+            - registry_withdrawn
+            - registry_inactive
+        evidence:
+          type: object
+          additionalProperties:
+            type: string
+          description: |
+            The compared values, for example `ingredient`, `label_strength`,
+            `registry_strength`, and `tolerance`.
+        source:
+          $ref: "#/components/schemas/SafetyFlagSource"
+    SafetyFlagSource:
+      type: object
+      required: [kind]
+      description: |
+        The citation for a flag: either a watchlist entry with its source
+        document, or the registry record that was compared.
+      properties:
+        kind:
+          type: string
+          enum: [watchlist_entry, registry]
+        watchlist_entry_id:
+          type: integer
+          format: int64
+        issuing_body:
+          type: string
+        title:
+          type: string
+        url:
+          type: string
+          format: uri
+        issued_at:
+          type: string
+          format: date-time
+        registry_source_id:
+          type: string
+        nrn:
+          type: string
+        status:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
     RegistryVerification:
       type: object
       required: [outcome, fields, dataset]

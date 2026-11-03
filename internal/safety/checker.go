@@ -107,6 +107,7 @@ func (c *Checker) checkWatchlistProduct(ctx context.Context, match verify.MatchR
 	entries, err := c.watchlist.ProductEntries(ctx, ProductQuery{
 		NRN:      nrn,
 		NameNorm: nameNorm,
+		MinScore: c.config.WatchlistNameThreshold,
 		Limit:    productLookupLimit,
 		Now:      now,
 	})

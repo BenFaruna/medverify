@@ -115,9 +115,15 @@ func (h *HTTPHandler) Create(w http.ResponseWriter, r *http.Request) {
 	waitCtx, waitCancel := context.WithTimeout(r.Context(), h.syncWait)
 	defer waitCancel()
 	final, terminal, waitErr := h.service.Wait(waitCtx, scan.ID)
-	if waitErr != nil && !errors.Is(waitErr, context.DeadlineExceeded) && !errors.Is(waitErr, context.Canceled) {
-		h.writeError(w, r, waitErr)
-		return
+	if waitErr != nil {
+		if !errors.Is(waitErr, context.DeadlineExceeded) && !errors.Is(waitErr, context.Canceled) {
+			h.writeError(w, r, waitErr)
+			return
+		}
+		// The client went away before the job reached a terminal state. Answer
+		// with the scan that was just created; Wait returns a zero value here,
+		// which would hand the client an empty id.
+		final, terminal = scan, false
 	}
 
 	status := http.StatusAccepted

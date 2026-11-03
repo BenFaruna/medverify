@@ -20,6 +20,7 @@ import (
 
 	"github.com/benfaruna/medverify/internal/platform/logging"
 	"github.com/benfaruna/medverify/internal/platform/testkit"
+	"github.com/benfaruna/medverify/internal/safety"
 	"github.com/benfaruna/medverify/internal/scan"
 	"github.com/benfaruna/medverify/internal/storage"
 	"github.com/benfaruna/medverify/internal/verify"
@@ -98,6 +99,7 @@ func TestProcessCompletesWithFakeProvider(t *testing.T) {
 	assert.Equal(t, scan.StatusCompleted, view.Status)
 	assert.Nil(t, view.Verdict)
 	assert.JSONEq(t, "[]", string(view.Reasons))
+	assert.JSONEq(t, "[]", string(view.Flags), "no flags is an empty list, not null")
 	assert.NotNil(t, view.Extracted)
 }
 
@@ -135,6 +137,112 @@ func TestProcessStoresRegistryVerification(t *testing.T) {
 	require.NotNil(t, view.Features)
 	assert.Contains(t, string(view.Features), "candidate_only")
 	assert.Equal(t, 1, pipeline.matcher.(*fakeMatcher).calls)
+}
+
+func TestProcessStoresSourcedSafetyFlags(t *testing.T) {
+	pipeline := newPipeline(t)
+	ctx := context.Background()
+
+	issued := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+
+	// A flag cites a real watchlist row, so the foreign key must resolve.
+	var (
+		sourceID         int64
+		watchlistEntryID int64
+	)
+	require.NoError(t, pipeline.pool.QueryRow(ctx, `
+		INSERT INTO watchlist_sources (issuing_body, title, source_url, issued_at)
+		VALUES ('NAFDAC', 'Public alert on a test batch', 'https://example.test/nafdac/alerts/2026-09-01', '2026-09-01')
+		RETURNING id`).Scan(&sourceID))
+	require.NoError(t, pipeline.pool.QueryRow(ctx, `
+		INSERT INTO watchlist_entries (source_id, kind, nrn, reason, reviewed_by)
+		SELECT id, 'alert', 'TT4-7001', 'Synthetic fixture entry', 'Test Reviewer'
+		FROM watchlist_sources WHERE source_url = 'https://example.test/nafdac/alerts/2026-09-01'
+		RETURNING id`).Scan(&watchlistEntryID))
+
+	pipeline.safety = &fakeSafety{flags: []safety.Flag{{
+		Type:       safety.WatchlistProduct,
+		Severity:   safety.SeverityHigh,
+		ReasonCode: safety.ReasonWatchlistAlert,
+		Evidence: map[string]string{
+			"issuing_body": "NAFDAC",
+			"issued_at":    "2026-09-01",
+			"source_url":   "https://example.test/nafdac/alerts/2026-09-01",
+		},
+		Source: safety.Source{
+			Kind:             safety.SourceWatchlistEntry,
+			WatchlistEntryID: watchlistEntryID,
+			IssuingBody:      "NAFDAC",
+			Title:            "Public alert on a test batch",
+			URL:              "https://example.test/nafdac/alerts/2026-09-01",
+			IssuedAt:         &issued,
+		},
+	}}}
+	pipeline.rebuild(t)
+
+	created := createScan(t, pipeline, "hash-safety")
+	require.NoError(t, pipeline.service.Process(ctx, created.ID.String()))
+	assert.Equal(t, 1, pipeline.safety.(*fakeSafety).calls)
+
+	finished, err := pipeline.service.Get(ctx, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, scan.StatusCompleted, finished.Status, "a rejected flag write must not leave the scan unfinished")
+	require.Len(t, finished.Flags, 1)
+	assert.Equal(t, safety.WatchlistProduct, finished.Flags[0].Type)
+	assert.Equal(t, watchlistEntryID, finished.Flags[0].Source.WatchlistEntryID)
+	assert.Equal(t, "https://example.test/nafdac/alerts/2026-09-01", finished.Flags[0].Source.URL)
+	assert.Equal(t, "2026-09-01", finished.Flags[0].Evidence["issued_at"])
+
+	view := finished.View()
+	var flagsView []map[string]any
+	require.NoError(t, json.Unmarshal(view.Flags, &flagsView))
+	require.Len(t, flagsView, 1)
+	assert.Equal(t, "watchlist_product", flagsView[0]["type"])
+	assert.Equal(t, "high", flagsView[0]["severity"])
+	assert.Equal(t, "watchlist_alert", flagsView[0]["reason_code"])
+
+	var stored int
+	require.NoError(t, pipeline.pool.QueryRow(ctx,
+		`SELECT count(*) FROM safety_flags WHERE scan_id = $1`, created.ID).Scan(&stored))
+	assert.Equal(t, 1, stored)
+
+	// A retry replaces the findings instead of appending to them.
+	_, err = pipeline.pool.Exec(ctx, `UPDATE scans SET status = 'processing', completed_at = NULL WHERE id = $1`, created.ID)
+	require.NoError(t, err)
+	replaced := []safety.Flag{{
+		Type: safety.MissingIngredient, Severity: safety.SeverityMedium,
+		ReasonCode: safety.ReasonMissingIngredient,
+		Evidence:   map[string]string{"ingredient": "caffeine"},
+		Source:     safety.Source{Kind: safety.SourceRegistry, NRN: "01-2345"},
+	}}
+	updated, err := pipeline.store.FinishScan(ctx, created.ID, scan.StatusCompleted, scan.Result{
+		Extracted: finished.Result.Extracted,
+		Features:  finished.Result.Features,
+		Flags:     replaced,
+	})
+	require.NoError(t, err)
+	require.True(t, updated)
+
+	again, err := pipeline.service.Get(ctx, created.ID)
+	require.NoError(t, err)
+	require.Len(t, again.Flags, 1)
+	assert.Equal(t, safety.MissingIngredient, again.Flags[0].Type)
+	assert.Equal(t, "caffeine", again.Flags[0].Evidence["ingredient"])
+}
+
+func TestProcessFailsWhenTheSafetyCheckerFails(t *testing.T) {
+	pipeline := newPipeline(t)
+	ctx := context.Background()
+	pipeline.safety = &fakeSafety{err: errors.New("watchlist unavailable")}
+	pipeline.rebuild(t)
+
+	created := createScan(t, pipeline, "hash-safety-fail")
+	err := pipeline.service.Process(ctx, created.ID.String())
+	require.Error(t, err)
+
+	failed, err := pipeline.service.Get(ctx, created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, scan.StatusFailed, failed.Status)
 }
 
 func TestProcessMarksFailedThenRetrySucceeds(t *testing.T) {
@@ -276,6 +384,7 @@ type testPipeline struct {
 	provider *vision.Fake
 	recorder vision.Recorder
 	matcher  scan.RegistryMatcher
+	safety   scan.SafetyChecker
 	enqueuer *fakeEnqueuer
 	service  *scan.Service
 	logs     *bytes.Buffer
@@ -292,6 +401,18 @@ type fakeMatcher struct {
 func (f *fakeMatcher) Match(context.Context, vision.LabelData) (verify.MatchResult, error) {
 	f.calls++
 	return f.result, f.err
+}
+
+// fakeSafety stands in for the phase 06 checker.
+type fakeSafety struct {
+	flags []safety.Flag
+	err   error
+	calls int
+}
+
+func (f *fakeSafety) Check(context.Context, verify.MatchResult, vision.LabelData) ([]safety.Flag, error) {
+	f.calls++
+	return f.flags, f.err
 }
 
 func newPipeline(t *testing.T) *testPipeline {
@@ -335,6 +456,7 @@ func (p *testPipeline) rebuildWithLogger(t *testing.T, logger *slog.Logger) {
 		Provider:      p.provider,
 		Recorder:      p.recorder,
 		Matcher:       p.matcher,
+		Safety:        p.safety,
 		Enqueuer:      p.enqueuer,
 		Logger:        logger,
 		MaxImages:     4,

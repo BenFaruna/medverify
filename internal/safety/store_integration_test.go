@@ -18,7 +18,7 @@ import (
 
 var testNow = time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)
 
-func safetyPool(t *testing.T) *pgxpool.Pool {
+func safetyPool(t testing.TB) *pgxpool.Pool {
 	t.Helper()
 
 	databaseURL := testkit.Postgres(t)

@@ -52,20 +52,33 @@ WHERE e.nrn = @nrn
   AND (e.effective_until IS NULL OR e.effective_until >= @today);
 
 -- name: SearchLiveWatchlistEntriesByName :many
+-- Nearest-neighbour search: the inner query uses the GiST trigram index and
+-- stops after @row_limit names, so a large watchlist is never scored in full.
+-- The similarity threshold is applied to those candidates, which can return
+-- fewer than @row_limit rows.
+WITH nearest AS (
+  SELECT
+    e.id,
+    (e.product_name_norm <-> @query::text)::double precision AS distance
+  FROM watchlist_entries e
+  WHERE e.active
+    AND (e.effective_until IS NULL OR e.effective_until >= @today)
+    AND e.product_name_norm IS NOT NULL
+  ORDER BY e.product_name_norm <-> @query::text
+  LIMIT @row_limit
+)
 SELECT
   sqlc.embed(e),
   s.issuing_body AS source_issuing_body,
   s.title AS source_title,
   s.source_url AS source_url,
   s.issued_at AS source_issued_at,
-  similarity(e.product_name_norm, @query)::double precision AS score
-FROM watchlist_entries e
+  (1 - nearest.distance)::double precision AS score
+FROM nearest
+JOIN watchlist_entries e ON e.id = nearest.id
 JOIN watchlist_sources s ON s.id = e.source_id
-WHERE e.product_name_norm % @query
-  AND e.active
-  AND (e.effective_until IS NULL OR e.effective_until >= @today)
-ORDER BY score DESC, e.id
-LIMIT @row_limit;
+WHERE nearest.distance <= 1 - @min_score::double precision
+ORDER BY nearest.distance, e.id;
 
 -- name: ListLiveWatchlistEntriesByIngredients :many
 SELECT

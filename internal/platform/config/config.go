@@ -51,6 +51,7 @@ type Config struct {
 	Scan      Scan
 	Vision    Vision
 	Verify    Verify
+	Safety    Safety
 }
 
 // HTTP holds the HTTP server settings.
@@ -138,6 +139,13 @@ type Vision struct {
 // versioned YAML file, not in environment variables, so the file's version can
 // be stored with every result. ConfigFile may point at an override.
 type Verify struct {
+	ConfigFile string
+}
+
+// Safety holds the phase 06 checker settings. Thresholds and the severity map
+// live in the versioned YAML file named by ConfigFile; an empty value selects
+// the embedded default.
+type Safety struct {
 	ConfigFile string
 }
 
@@ -259,6 +267,9 @@ func LoadFrom(environ []string) (Config, error) {
 		},
 		Verify: Verify{
 			ConfigFile: l.str("VERIFY_CONFIG_FILE", ""),
+		},
+		Safety: Safety{
+			ConfigFile: l.str("SAFETY_CONFIG_FILE", ""),
 		},
 		Vision: Vision{
 			Provider:                l.oneOf("VISION_PROVIDER", "fake", "fake", "claude"),

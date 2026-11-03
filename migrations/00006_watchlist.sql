@@ -53,8 +53,10 @@ CREATE INDEX watchlist_entries_nrn_idx
   ON watchlist_entries (nrn) WHERE nrn IS NOT NULL;
 CREATE INDEX watchlist_entries_ingredient_idx
   ON watchlist_entries (ingredient_norm) WHERE ingredient_norm IS NOT NULL;
+-- GiST rather than GIN: fuzzy name lookup asks for the nearest names, so a
+-- KNN scan can stop after the candidate limit instead of scoring every row.
 CREATE INDEX watchlist_entries_name_trgm
-  ON watchlist_entries USING gin (product_name_norm gin_trgm_ops);
+  ON watchlist_entries USING gist (product_name_norm gist_trgm_ops);
 CREATE INDEX watchlist_entries_live_idx
   ON watchlist_entries (active, effective_until);
 -- One row per reviewed entry in a source document. Re-running an import must

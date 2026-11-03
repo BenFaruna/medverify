@@ -334,23 +334,33 @@ func (q *Queries) ListWatchlistEntries(ctx context.Context) ([]ListWatchlistEntr
 }
 
 const searchLiveWatchlistEntriesByName = `-- name: SearchLiveWatchlistEntriesByName :many
+WITH nearest AS (
+  SELECT
+    e.id,
+    (e.product_name_norm <-> $2::text)::double precision AS distance
+  FROM watchlist_entries e
+  WHERE e.active
+    AND (e.effective_until IS NULL OR e.effective_until >= $3)
+    AND e.product_name_norm IS NOT NULL
+  ORDER BY e.product_name_norm <-> $2::text
+  LIMIT $4
+)
 SELECT
   e.id, e.source_id, e.kind, e.nrn, e.product_name, e.product_name_norm, e.manufacturer, e.manufacturer_norm, e.ingredient_norm, e.reason, e.effective_until, e.active, e.reviewed_by, e.review_due_at, e.created_at,
   s.issuing_body AS source_issuing_body,
   s.title AS source_title,
   s.source_url AS source_url,
   s.issued_at AS source_issued_at,
-  similarity(e.product_name_norm, $1)::double precision AS score
-FROM watchlist_entries e
+  (1 - nearest.distance)::double precision AS score
+FROM nearest
+JOIN watchlist_entries e ON e.id = nearest.id
 JOIN watchlist_sources s ON s.id = e.source_id
-WHERE e.product_name_norm % $1
-  AND e.active
-  AND (e.effective_until IS NULL OR e.effective_until >= $2)
-ORDER BY score DESC, e.id
-LIMIT $3
+WHERE nearest.distance <= 1 - $1::double precision
+ORDER BY nearest.distance, e.id
 `
 
 type SearchLiveWatchlistEntriesByNameParams struct {
+	MinScore float64    `json:"min_score"`
 	Query    string     `json:"query"`
 	Today    *time.Time `json:"today"`
 	RowLimit int32      `json:"row_limit"`
@@ -365,8 +375,17 @@ type SearchLiveWatchlistEntriesByNameRow struct {
 	Score             float64        `json:"score"`
 }
 
+// Nearest-neighbour search: the inner query uses the GiST trigram index and
+// stops after @row_limit names, so a large watchlist is never scored in full.
+// The similarity threshold is applied to those candidates, which can return
+// fewer than @row_limit rows.
 func (q *Queries) SearchLiveWatchlistEntriesByName(ctx context.Context, arg SearchLiveWatchlistEntriesByNameParams) ([]SearchLiveWatchlistEntriesByNameRow, error) {
-	rows, err := q.db.Query(ctx, searchLiveWatchlistEntriesByName, arg.Query, arg.Today, arg.RowLimit)
+	rows, err := q.db.Query(ctx, searchLiveWatchlistEntriesByName,
+		arg.MinScore,
+		arg.Query,
+		arg.Today,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

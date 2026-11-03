@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/benfaruna/medverify/internal/safety"
 	"github.com/benfaruna/medverify/internal/storage"
 	"github.com/benfaruna/medverify/internal/verify"
 	"github.com/benfaruna/medverify/internal/vision"
@@ -34,6 +35,11 @@ type RegistryMatcher interface {
 	Match(ctx context.Context, label vision.LabelData) (verify.MatchResult, error)
 }
 
+// SafetyChecker turns a match result and label into sourced safety flags.
+type SafetyChecker interface {
+	Check(ctx context.Context, match verify.MatchResult, label vision.LabelData) ([]safety.Flag, error)
+}
+
 // ServiceOptions configures the scan pipeline.
 type ServiceOptions struct {
 	Store             *Store
@@ -41,6 +47,7 @@ type ServiceOptions struct {
 	Provider          vision.Provider
 	Recorder          vision.Recorder
 	Matcher           RegistryMatcher
+	Safety            SafetyChecker
 	Enqueuer          Enqueuer
 	Logger            *slog.Logger
 	MaxImages         int
@@ -59,6 +66,7 @@ type Service struct {
 	provider          vision.Provider
 	recorder          vision.Recorder
 	matcher           RegistryMatcher
+	safety            SafetyChecker
 	enqueuer          Enqueuer
 	logger            *slog.Logger
 	maxImages         int
@@ -102,6 +110,7 @@ func NewService(opts ServiceOptions) (*Service, error) {
 		provider:          opts.Provider,
 		recorder:          opts.Recorder,
 		matcher:           opts.Matcher,
+		safety:            opts.Safety,
 		enqueuer:          opts.Enqueuer,
 		logger:            logger,
 		maxImages:         opts.MaxImages,
@@ -364,12 +373,14 @@ func (s *Service) Process(ctx context.Context, rawID string) error {
 	}
 
 	features := json.RawMessage("{}")
+	match := verify.MatchResult{Fields: map[string]verify.FieldComparison{}}
 	if s.matcher != nil {
-		match, err := s.matcher.Match(ctx, label)
+		result, err := s.matcher.Match(ctx, label)
 		if err != nil {
 			s.finishFailed(ctx, id, fmt.Errorf("verify label: %w", err))
 			return fmt.Errorf("verify scan %s: %w", id, err)
 		}
+		match = result
 		features, err = json.Marshal(match)
 		if err != nil {
 			s.finishFailed(ctx, id, fmt.Errorf("encode match result: %w", err))
@@ -377,9 +388,19 @@ func (s *Service) Process(ctx context.Context, rawID string) error {
 		}
 	}
 
+	var flags []safety.Flag
+	if s.safety != nil {
+		flags, err = s.safety.Check(ctx, match, label)
+		if err != nil {
+			s.finishFailed(ctx, id, fmt.Errorf("check safety: %w", err))
+			return fmt.Errorf("check safety for scan %s: %w", id, err)
+		}
+	}
+
 	s.finish(ctx, id, StatusCompleted, Result{
 		Extracted: extracted,
 		Features:  features,
+		Flags:     flags,
 		Provider:  providerName,
 		Reasons:   []byte("[]"),
 	})

@@ -74,6 +74,10 @@ type Querier interface {
 	// River retries a failed job. Moving failed back to queued is the only
 	// transition that lets the retry claim the scan again.
 	RequeueFailedScan(ctx context.Context, id uuid.UUID) (int64, error)
+	// Nearest-neighbour search: the inner query uses the GiST trigram index and
+	// stops after @row_limit names, so a large watchlist is never scored in full.
+	// The similarity threshold is applied to those candidates, which can return
+	// fewer than @row_limit rows.
 	SearchLiveWatchlistEntriesByName(ctx context.Context, arg SearchLiveWatchlistEntriesByNameParams) ([]SearchLiveWatchlistEntriesByNameRow, error)
 	// Trigram search ranked by similarity. The pg_trgm % operator keeps the index
 	// usable; similarity() orders the results so typos and word-order changes rank

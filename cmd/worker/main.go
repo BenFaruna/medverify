@@ -19,6 +19,7 @@ import (
 	"github.com/benfaruna/medverify/internal/platform/jobs"
 	"github.com/benfaruna/medverify/internal/platform/logging"
 	"github.com/benfaruna/medverify/internal/registry"
+	"github.com/benfaruna/medverify/internal/safety"
 	"github.com/benfaruna/medverify/internal/scan"
 	"github.com/benfaruna/medverify/internal/storage"
 	"github.com/benfaruna/medverify/internal/verify"
@@ -94,12 +95,25 @@ func run() error {
 		return err
 	}
 
+	safetyConfig, err := safety.LoadConfig(cfg.Safety.ConfigFile)
+	if err != nil {
+		return err
+	}
+	checker, err := safety.NewChecker(safety.CheckerOptions{
+		Watchlist: safety.NewStore(pool),
+		Config:    safetyConfig,
+	})
+	if err != nil {
+		return err
+	}
+
 	scanService, err := scan.NewService(scan.ServiceOptions{
 		Store:     scan.NewStore(pool),
 		Objects:   objects,
 		Provider:  provider,
 		Recorder:  llm.NewRecorder(pool),
 		Matcher:   matcher,
+		Safety:    checker,
 		Logger:    logger,
 		MaxImages: cfg.Scan.MaxImages,
 		Limits: scan.ImageLimits{
@@ -130,6 +144,7 @@ func run() error {
 		slog.String("vision_provider", cfg.Vision.Provider),
 		slog.String("vision_model", cfg.Vision.Model),
 		slog.String("verify_config_version", verifyConfig.Version),
+		slog.String("safety_config_version", safetyConfig.Version),
 	)
 
 	<-ctx.Done()
