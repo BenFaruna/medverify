@@ -6,16 +6,20 @@
 //	medverify-admin migrate up|down|status
 //	medverify-admin storage init
 //	medverify-admin job noop [message]
+//	medverify-admin verdict replay --rules <file> [--limit N]
 package main
 
 import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"os/signal"
+	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"syscall"
 	"text/tabwriter"
 	"time"
@@ -26,7 +30,9 @@ import (
 	"github.com/benfaruna/medverify/internal/platform/logging"
 	"github.com/benfaruna/medverify/internal/registry"
 	"github.com/benfaruna/medverify/internal/safety"
+	"github.com/benfaruna/medverify/internal/scan"
 	"github.com/benfaruna/medverify/internal/storage"
+	"github.com/benfaruna/medverify/internal/verdict"
 	"github.com/benfaruna/medverify/migrations"
 )
 
@@ -49,6 +55,9 @@ commands:
                         show watchlist entries, sources, and review dates
   watchlist deactivate <id>
                         retire an entry without deleting its history
+  verdict replay --rules <file> [--limit N]
+                        re-score stored scans under a different rules file and
+                        show which verdicts changed (dry run, writes nothing)
 `
 
 func main() {
@@ -93,6 +102,8 @@ func run(args []string) error {
 		return registryCommand(ctx, cfg, args[1:])
 	case "watchlist":
 		return watchlistCommand(ctx, cfg, args[1:])
+	case "verdict":
+		return verdictCommand(ctx, cfg, args[1:])
 	case "help", "-h", "--help":
 		_, _ = fmt.Fprint(os.Stdout, usage)
 		return nil
@@ -393,6 +404,122 @@ func printIngestionReport(report registry.IngestionReport) {
 		}
 		_ = w.Flush()
 	}
+}
+
+func verdictCommand(ctx context.Context, cfg config.Config, args []string) error {
+	if len(args) == 0 || args[0] != "replay" {
+		return fmt.Errorf("verdict requires the action: replay")
+	}
+	return verdictReplay(ctx, cfg, args[1:])
+}
+
+// verdictReplay re-scores stored results from their recorded signals. It never
+// calls the provider, reads an image, or writes to the database: a replay that
+// changed anything would defeat the point of an audit trail.
+func verdictReplay(ctx context.Context, cfg config.Config, args []string) error {
+	path := ""
+	limit := 100
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--rules":
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("--rules requires a file")
+			}
+			path = args[i]
+		case "--limit":
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("--limit requires a number")
+			}
+			value, err := strconv.Atoi(args[i])
+			if err != nil || value <= 0 {
+				return fmt.Errorf("--limit must be a positive number")
+			}
+			limit = value
+		default:
+			return fmt.Errorf("unknown verdict replay option %q", args[i])
+		}
+	}
+	if path == "" {
+		return fmt.Errorf("verdict replay requires --rules <file>")
+	}
+
+	rules, err := verdict.LoadRules(path)
+	if err != nil {
+		return err
+	}
+
+	pool, err := db.Open(cfg.Database)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	stored, err := scan.NewStore(pool).ListVerdictReplay(ctx, limit)
+	if err != nil {
+		return err
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(w, "SCAN\tSTORED\tREPLAY\tCHANGED")
+	changed := 0
+	differences := map[verdict.Verdict]int{}
+	for _, entry := range stored {
+		replayed := verdict.Evaluate(entry.Signals, rules)
+		difference := verdictDifference(entry.Result, replayed)
+		if difference == "" {
+			continue
+		}
+		changed++
+		if replayed.Verdict != entry.Result.Verdict {
+			differences[replayed.Verdict]++
+		}
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+			entry.ScanID,
+			summarizeVerdict(entry.Result),
+			summarizeVerdict(replayed),
+			difference,
+		)
+	}
+	if err := w.Flush(); err != nil {
+		return err
+	}
+
+	_, _ = fmt.Fprintf(os.Stdout, "replayed %d scans under %s: %d changed\n", len(stored), rules.Version, changed)
+	for _, value := range verdict.Verdicts {
+		if differences[value] > 0 {
+			_, _ = fmt.Fprintf(os.Stdout, "  now %s: %d\n", value, differences[value])
+		}
+	}
+	return nil
+}
+
+func summarizeVerdict(result verdict.Result) string {
+	return fmt.Sprintf("%s/%s/%d", result.Verdict, result.Confidence, result.Score)
+}
+
+// verdictDifference names what a replay changed, or returns empty when the
+// stored and replayed results agree.
+func verdictDifference(stored, replayed verdict.Result) string {
+	var parts []string
+	if stored.Verdict != replayed.Verdict {
+		parts = append(parts, "verdict")
+	}
+	if stored.Score != replayed.Score {
+		parts = append(parts, "score")
+	}
+	if stored.Confidence != replayed.Confidence {
+		parts = append(parts, "confidence")
+	}
+	if !slices.EqualFunc(stored.Reasons, replayed.Reasons, sameReason) {
+		parts = append(parts, "reasons")
+	}
+	return strings.Join(parts, ",")
+}
+
+func sameReason(a, b verdict.Reason) bool {
+	return a.Code == b.Code && a.Field == b.Field && maps.Equal(a.Params, b.Params)
 }
 
 func watchlistCommand(ctx context.Context, cfg config.Config, args []string) error {

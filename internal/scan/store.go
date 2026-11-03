@@ -20,6 +20,16 @@ import (
 // ErrScanNotFound is returned when a scan ID does not exist.
 var ErrScanNotFound = errors.New("scan not found")
 
+// StoredVerdict is one persisted verdict with the exact signals it was
+// computed from. Replay uses only this record: no images, no clock, no
+// database reads of the registry or watchlist.
+type StoredVerdict struct {
+	ScanID    uuid.UUID
+	Result    verdict.Result
+	Signals   verdict.Signals
+	CreatedAt time.Time
+}
+
 // Store persists scans, their images, results, and idempotency records.
 type Store struct {
 	pool    *pgxpool.Pool
@@ -337,6 +347,37 @@ func imageFromRow(row dbgen.ScanImage) Image {
 		SHA256:      row.Sha256,
 		CreatedAt:   row.CreatedAt,
 	}
+}
+
+// ListVerdictReplay returns the most recent scored results, newest first.
+func (s *Store) ListVerdictReplay(ctx context.Context, limit int) ([]StoredVerdict, error) {
+	rows, err := s.queries.ListScoredScanResults(ctx, int32(limit))
+	if err != nil {
+		return nil, fmt.Errorf("list scored scans: %w", err)
+	}
+	stored := make([]StoredVerdict, 0, len(rows))
+	for _, row := range rows {
+		entry := StoredVerdict{
+			ScanID:    row.ScanID,
+			CreatedAt: row.CreatedAt,
+			Result: verdict.Result{
+				Score:        int(row.VerdictScore.Int16),
+				Confidence:   verdict.Confidence(valueOrEmpty(row.VerdictConfidence)),
+				RulesVersion: valueOrEmpty(row.VerdictRulesVersion),
+			},
+		}
+		if row.VerdictCode != nil {
+			entry.Result.Verdict = verdict.Verdict(*row.VerdictCode)
+		}
+		if err := json.Unmarshal(row.Reasons, &entry.Result.Reasons); err != nil {
+			return nil, fmt.Errorf("decode reasons for scan %s: %w", row.ScanID, err)
+		}
+		if err := json.Unmarshal(row.Signals, &entry.Signals); err != nil {
+			return nil, fmt.Errorf("decode signals for scan %s: %w", row.ScanID, err)
+		}
+		stored = append(stored, entry)
+	}
+	return stored, nil
 }
 
 func resultFromRow(row dbgen.ScanResult) (Result, error) {

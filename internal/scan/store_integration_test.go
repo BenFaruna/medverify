@@ -23,6 +23,7 @@ import (
 	"github.com/benfaruna/medverify/internal/safety"
 	"github.com/benfaruna/medverify/internal/scan"
 	"github.com/benfaruna/medverify/internal/storage"
+	"github.com/benfaruna/medverify/internal/verdict"
 	"github.com/benfaruna/medverify/internal/verify"
 	"github.com/benfaruna/medverify/internal/vision"
 	"github.com/benfaruna/medverify/migrations"
@@ -230,6 +231,76 @@ func TestProcessStoresSourcedSafetyFlags(t *testing.T) {
 	assert.Equal(t, "caffeine", again.Flags[0].Evidence["ingredient"])
 }
 
+func TestProcessStoresVerdictSignalsAndRulesVersion(t *testing.T) {
+	pipeline := newPipeline(t)
+	ctx := context.Background()
+
+	rules, err := verdict.LoadRules("")
+	require.NoError(t, err)
+	pipeline.rules = &rules
+	pipeline.matcher = &fakeMatcher{result: verify.MatchResult{
+		Outcome: verify.MatchedConsistent,
+		Fields: map[string]verify.FieldComparison{
+			verify.FieldNRN: {Outcome: verify.Agree, Reasons: []string{verify.ReasonNRNExactMatch}},
+		},
+		Dataset: verify.DatasetInfo{ConfigVersion: verify.ConfigVersion, Products: 198},
+	}}
+	pipeline.rebuild(t)
+
+	created := createScan(t, pipeline, "hash-verdict")
+	require.NoError(t, pipeline.service.Process(ctx, created.ID.String()))
+
+	finished, err := pipeline.service.Get(ctx, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, scan.StatusCompleted, finished.Status)
+	require.NotNil(t, finished.Result.Verdict, "a completed scan under configured rules must have a verdict")
+	storedVerdict := finished.Result.Verdict
+	assert.Equal(t, verdict.ConsistentWithRecords, storedVerdict.Verdict)
+	assert.Equal(t, verdict.ConfidenceHigh, storedVerdict.Confidence)
+	assert.Equal(t, rules.Version, storedVerdict.RulesVersion)
+	assert.NotEmpty(t, storedVerdict.Reasons)
+	assert.LessOrEqual(t, storedVerdict.Score, rules.Bands[verdict.ConsistentWithRecords].Max)
+
+	// The columns are typed, and the signals that produced them are stored.
+	var (
+		code       string
+		score      int16
+		confidence string
+		version    string
+		signals    []byte
+	)
+	require.NoError(t, pipeline.pool.QueryRow(ctx, `
+		SELECT verdict_code, verdict_score, verdict_confidence, verdict_rules_version, signals
+		FROM scan_results WHERE scan_id = $1`, created.ID,
+	).Scan(&code, &score, &confidence, &version, &signals))
+	assert.Equal(t, string(verdict.ConsistentWithRecords), code)
+	assert.Equal(t, int16(storedVerdict.Score), score)
+	assert.Equal(t, string(verdict.ConfidenceHigh), confidence)
+	assert.Equal(t, rules.Version, version)
+	var decoded verdict.Signals
+	require.NoError(t, json.Unmarshal(signals, &decoded))
+	assert.Equal(t, verify.MatchedConsistent, decoded.Outcome)
+	assert.Equal(t, 198, decoded.DatasetProducts)
+
+	// Replay reads the stored signals only and reproduces the same verdict.
+	stored, err := pipeline.store.ListVerdictReplay(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.Equal(t, created.ID, stored[0].ScanID)
+	replayed := verdict.Evaluate(stored[0].Signals, rules)
+	assert.Equal(t, storedVerdict.Verdict, replayed.Verdict)
+	assert.Equal(t, storedVerdict.Score, replayed.Score)
+	assert.Equal(t, storedVerdict.Reasons, replayed.Reasons)
+
+	// A stricter rules version changes the outcome of the same stored signals.
+	strict := rules
+	strict.Version = "verdict-replay-test"
+	strict.Gate.MinExtractionConfidence = 0.99
+	changed := verdict.Evaluate(stored[0].Signals, strict)
+	assert.Equal(t, verdict.Unreadable, changed.Verdict)
+	assert.NotEqual(t, storedVerdict.Verdict, changed.Verdict)
+}
+
 func TestProcessFailsWhenTheSafetyCheckerFails(t *testing.T) {
 	pipeline := newPipeline(t)
 	ctx := context.Background()
@@ -385,6 +456,7 @@ type testPipeline struct {
 	recorder vision.Recorder
 	matcher  scan.RegistryMatcher
 	safety   scan.SafetyChecker
+	rules    *verdict.Rules
 	enqueuer *fakeEnqueuer
 	service  *scan.Service
 	logs     *bytes.Buffer
@@ -457,6 +529,7 @@ func (p *testPipeline) rebuildWithLogger(t *testing.T, logger *slog.Logger) {
 		Recorder:      p.recorder,
 		Matcher:       p.matcher,
 		Safety:        p.safety,
+		Rules:         p.rules,
 		Enqueuer:      p.enqueuer,
 		Logger:        logger,
 		MaxImages:     4,
