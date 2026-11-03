@@ -20,6 +20,30 @@ type ApiClient struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type AssistantToolCall struct {
+	ID             int64     `json:"id"`
+	ConversationID uuid.UUID `json:"conversation_id"`
+	ScanID         uuid.UUID `json:"scan_id"`
+	Turn           int32     `json:"turn"`
+	ToolName       string    `json:"tool_name"`
+	Arguments      []byte    `json:"arguments"`
+	Outcome        string    `json:"outcome"`
+	SourceIds      []string  `json:"source_ids"`
+	LatencyMs      int32     `json:"latency_ms"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+type Conversation struct {
+	ID            uuid.UUID `json:"id"`
+	ScanID        uuid.UUID `json:"scan_id"`
+	Language      string    `json:"language"`
+	RulesVersion  string    `json:"rules_version"`
+	PromptVersion string    `json:"prompt_version"`
+	CreatedAt     time.Time `json:"created_at"`
+	LastTurnAt    time.Time `json:"last_turn_at"`
+	ExpiresAt     time.Time `json:"expires_at"`
+}
+
 type IdempotencyKey struct {
 	ClientKey      string    `json:"client_key"`
 	IdempotencyKey string    `json:"idempotency_key"`
@@ -42,6 +66,22 @@ type LlmCall struct {
 	Outcome       string         `json:"outcome"`
 	ErrorCode     *string        `json:"error_code"`
 	CreatedAt     time.Time      `json:"created_at"`
+}
+
+type Message struct {
+	ID             int64     `json:"id"`
+	ConversationID uuid.UUID `json:"conversation_id"`
+	ScanID         uuid.UUID `json:"scan_id"`
+	Turn           int32     `json:"turn"`
+	Role           string    `json:"role"`
+	Content        string    `json:"content"`
+	Intent         *string   `json:"intent"`
+	Language       *string   `json:"language"`
+	ToolNames      []string  `json:"tool_names"`
+	SourceIds      []string  `json:"source_ids"`
+	Verifier       *string   `json:"verifier"`
+	RefusalReason  *string   `json:"refusal_reason"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 type Product struct {

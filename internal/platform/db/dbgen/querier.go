@@ -15,16 +15,19 @@ type Querier interface {
 	// The guarded update is the state machine: only a queued row moves to
 	// processing, so two workers cannot process the same scan.
 	ClaimScan(ctx context.Context, id uuid.UUID) (int64, error)
+	CountConversationUserMessages(ctx context.Context, conversationID uuid.UUID) (int64, error)
 	CountProductIngredients(ctx context.Context) (int64, error)
 	CountProducts(ctx context.Context) (int64, error)
 	CountProductsWithLeafletURL(ctx context.Context) (int64, error)
 	CountRAGChunksByModel(ctx context.Context, embeddingModel string) (int64, error)
 	CountSMPCDocumentsByStatus(ctx context.Context) ([]CountSMPCDocumentsByStatusRow, error)
 	CountSMPCSections(ctx context.Context) (int64, error)
+	CreateConversation(ctx context.Context, arg CreateConversationParams) (Conversation, error)
 	// Queries for the scan pipeline (phase 03). Hand-written SQL only; sqlc
 	// compiles it.
 	CreateScan(ctx context.Context, arg CreateScanParams) (Scan, error)
 	DeactivateWatchlistEntry(ctx context.Context, id int64) (int64, error)
+	DeleteExpiredConversations(ctx context.Context) (int64, error)
 	DeleteProductIngredients(ctx context.Context, productID int64) error
 	DeleteRAGChunksForDocumentModel(ctx context.Context, arg DeleteRAGChunksForDocumentModelParams) error
 	DeleteSMPCSections(ctx context.Context, documentID int64) error
@@ -35,18 +38,24 @@ type Querier interface {
 	// A terminal write only applies to a row this worker claimed.
 	FinishScan(ctx context.Context, arg FinishScanParams) (int64, error)
 	FinishSyncRun(ctx context.Context, arg FinishSyncRunParams) error
+	// Queries for the grounded assistant (phase 09). All reads are scoped by the
+	// conversation's scan; there is no query that accepts a product or NRN from a
+	// caller in place of a scan.
+	GetConversationByScan(ctx context.Context, scanID uuid.UUID) (Conversation, error)
 	GetIdempotencyKey(ctx context.Context, arg GetIdempotencyKeyParams) (IdempotencyKey, error)
 	GetProductByNRN(ctx context.Context, nrn *string) (Product, error)
 	GetProductBySourceID(ctx context.Context, sourceID string) (Product, error)
 	GetSMPCDocument(ctx context.Context, arg GetSMPCDocumentParams) (SmpcDocument, error)
 	GetScan(ctx context.Context, id uuid.UUID) (Scan, error)
 	GetScanResult(ctx context.Context, scanID uuid.UUID) (ScanResult, error)
+	InsertAssistantToolCall(ctx context.Context, arg InsertAssistantToolCallParams) error
 	// The primary key makes the race safe: one concurrent request wins and the
 	// other receives no row, then reads the winner.
 	InsertIdempotencyKey(ctx context.Context, arg InsertIdempotencyKeyParams) (IdempotencyKey, error)
 	// Cost and latency records for provider calls. No prompt or response text is
 	// stored here.
 	InsertLLMCall(ctx context.Context, arg InsertLLMCallParams) (LlmCall, error)
+	InsertMessage(ctx context.Context, arg InsertMessageParams) (Message, error)
 	InsertProductIngredient(ctx context.Context, arg InsertProductIngredientParams) error
 	InsertRAGChunk(ctx context.Context, arg InsertRAGChunkParams) error
 	InsertSMPCSection(ctx context.Context, arg InsertSMPCSectionParams) error
@@ -63,6 +72,7 @@ type Querier interface {
 	ListIngredientNameCounts(ctx context.Context, rowLimit int32) ([]ListIngredientNameCountsRow, error)
 	ListLiveWatchlistEntriesByIngredients(ctx context.Context, arg ListLiveWatchlistEntriesByIngredientsParams) ([]ListLiveWatchlistEntriesByIngredientsRow, error)
 	ListLiveWatchlistEntriesByNRN(ctx context.Context, arg ListLiveWatchlistEntriesByNRNParams) ([]ListLiveWatchlistEntriesByNRNRow, error)
+	ListMessages(ctx context.Context, conversationID uuid.UUID) ([]Message, error)
 	ListProductIngredients(ctx context.Context, productID int64) ([]ProductIngredient, error)
 	ListProductsByIngredient(ctx context.Context, arg ListProductsByIngredientParams) ([]Product, error)
 	// Products whose leaflet is missing, failed, or older than the product record.
@@ -98,6 +108,7 @@ type Querier interface {
 	SearchRAGChunksByText(ctx context.Context, arg SearchRAGChunksByTextParams) ([]SearchRAGChunksByTextRow, error)
 	SearchRAGChunksByVector(ctx context.Context, arg SearchRAGChunksByVectorParams) ([]SearchRAGChunksByVectorRow, error)
 	StartSyncRun(ctx context.Context, startedAt time.Time) (SyncRun, error)
+	TouchConversation(ctx context.Context, id uuid.UUID) error
 	// Queries for the Greenbook registry. Hand-written SQL only; sqlc compiles it.
 	// Insert or update a product when its payload hash changed. The xmax trick
 	// reports whether the row was inserted (true) or updated (false). No row is
