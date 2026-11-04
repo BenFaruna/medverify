@@ -1,84 +1,330 @@
-// Command eval scores label extraction against a versioned ground-truth
-// manifest. Phase 04 ships the extraction scorer; phase 10 extends it to the
-// assistant and nightly regression runs.
+// Command eval scores AI-dependent components against versioned, labelled
+// datasets and enforces release gates.
 //
-// The manifest is not committed because real pack photos need recorded consent.
-// See testdata/eval/README.md for the format.
+// Subcommands:
+//
+//	assistant   score a recorded assistant run against an assistant dataset
+//	extraction  score pack photos against an extraction manifest
+//	retrieval   score leaflet retrieval against a labelled question set
+//
+// Reports always carry the dataset version and hash, model, prompt version, and
+// rules version. A failing gate exits non-zero.
+//
+// Dataset files are not fabricated here. Fixtures under testdata only prove the
+// machinery; they never stand in for human labels.
 package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
-	"sort"
+	"strings"
+	"time"
 
+	"github.com/benfaruna/medverify/internal/eval"
 	"github.com/benfaruna/medverify/internal/platform/config"
+	"github.com/benfaruna/medverify/internal/platform/db"
+	"github.com/benfaruna/medverify/internal/rag"
 	"github.com/benfaruna/medverify/internal/vision"
 	"github.com/benfaruna/medverify/internal/vision/visioncfg"
 )
 
 func main() {
-	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "eval: "+err.Error())
-		os.Exit(1)
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+const usage = `usage: eval <command> [options]
+
+commands:
+  assistant   score recorded assistant outputs against a dataset (offline)
+  extraction  score pack photos against a labelled extraction manifest
+  retrieval   score leaflet retrieval against a labelled question set
+
+Run "eval <command> -h" for command options.
+`
+
+func run(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprint(stderr, usage)
+		return 2
+	}
+	switch args[0] {
+	case "assistant":
+		return runAssistant(args[1:], stdout, stderr)
+	case "extraction":
+		return runExtraction(args[1:], stdout, stderr)
+	case "retrieval":
+		return runRetrieval(args[1:], stdout, stderr)
+	case "help", "-h", "--help":
+		fmt.Fprint(stdout, usage)
+		return 0
+	default:
+		fmt.Fprintf(stderr, "eval: unknown command %q\n\n", args[0])
+		fmt.Fprint(stderr, usage)
+		return 2
 	}
 }
 
-func run() error {
-	manifestPath := flag.String("manifest", "testdata/eval/extraction.json", "path to the extraction eval manifest")
-	asJSON := flag.Bool("json", false, "print the report as JSON")
-	minNRN := flag.Float64("min-nrn", 0.90, "minimum normalized NRN match rate")
-	flag.Parse()
+func runAssistant(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("assistant", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	datasetDir := flags.String("dataset", "", "dataset directory containing dataset.json and cases.jsonl")
+	recordedPath := flags.String("recorded", "", "JSONL recorded assistant outputs")
+	split := flags.String("split", "dev", "dataset split: dev or test")
+	gatesPath := flags.String("gates", "", "gate file (optional)")
+	outDir := flags.String("out-dir", "", "directory for JSON and Markdown reports (optional)")
+	asJSON := flags.Bool("json", false, "print the JSON report instead of Markdown")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if *datasetDir == "" || *recordedPath == "" {
+		fmt.Fprintln(stderr, "eval: assistant requires -dataset and -recorded")
+		return 2
+	}
+	selectedSplit := eval.Split(*split)
+	if !selectedSplit.Valid() {
+		fmt.Fprintf(stderr, "eval: -split must be dev or test, got %q\n", *split)
+		return 2
+	}
+
+	dataset, err := eval.LoadDataset(*datasetDir)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	outputs, err := eval.LoadRecordedOutputs(*recordedPath)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	report, err := eval.ScoreAssistant(dataset, selectedSplit, outputs, now())
+	if err != nil {
+		return fail(stderr, err)
+	}
+	return finishReport(report, *gatesPath, *outDir, *asJSON, stdout, stderr)
+}
+
+func runExtraction(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("extraction", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	manifestPath := flags.String("manifest", "testdata/eval/extraction.json", "path to the extraction eval manifest")
+	version := flags.String("version", "", "dataset version recorded in the report (defaults to the manifest name)")
+	minNRN := flags.Float64("min-nrn", 0.90, "minimum normalized NRN match rate")
+	gatesPath := flags.String("gates", "", "gate file (optional)")
+	outDir := flags.String("out-dir", "", "directory for JSON and Markdown reports (optional)")
+	asJSON := flags.Bool("json", false, "print the JSON report instead of Markdown")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
-		return err
+		return fail(stderr, err)
 	}
 	if cfg.Vision.Provider == "fake" {
-		fmt.Fprintln(os.Stderr, "eval: WARNING: VISION_PROVIDER=fake scores a deterministic placeholder, not a model")
+		fmt.Fprintln(stderr, "eval: WARNING: VISION_PROVIDER=fake scores a deterministic placeholder, not a model")
 	}
 	provider, err := visioncfg.New(cfg.Vision)
 	if err != nil {
-		return err
+		return fail(stderr, err)
 	}
-
+	manifestBytes, err := os.ReadFile(*manifestPath)
+	if err != nil {
+		return fail(stderr, fmt.Errorf("eval: read manifest: %w", err))
+	}
 	manifest, err := vision.LoadEvalManifest(*manifestPath)
 	if err != nil {
-		return err
+		return fail(stderr, err)
 	}
 	baseDir := filepath.Dir(*manifestPath)
-	report := vision.EvalReport{}
-
+	source := vision.EvalReport{}
+	model, promptVersion := "", ""
 	for _, evalCase := range manifest.Cases {
 		label, err := extractCase(context.Background(), provider, cfg.Vision.MaxImageDimension, baseDir, evalCase)
 		if err != nil {
-			return fmt.Errorf("case %s: %w", evalCase.ID, err)
+			return fail(stderr, fmt.Errorf("case %s: %w", evalCase.ID, err))
 		}
-		report.ScoreCase(evalCase, label)
-	}
-
-	if *asJSON {
-		encoded, err := json.MarshalIndent(report, "", "  ")
-		if err != nil {
-			return err
+		if model == "" {
+			model, promptVersion = label.Model, label.PromptVersion
 		}
-		fmt.Println(string(encoded))
-	} else {
-		printReport(manifest.Name, report)
+		source.ScoreCase(evalCase, label)
 	}
+	if model == "" {
+		model = "unknown"
+	}
+	if promptVersion == "" {
+		promptVersion = "unknown"
+	}
+	datasetVersion := *version
+	if datasetVersion == "" {
+		datasetVersion = manifest.Name
+	}
+	report := eval.ExtractionReport(manifest.Name, datasetVersion, eval.HashBytes(manifestBytes),
+		model, promptVersion, now(), source)
 
-	if report.FabricatedNRN > 0 {
-		return fmt.Errorf("%d case(s) produced an NRN where the labeller read none", report.FabricatedNRN)
+	failures, err := loadGates(*gatesPath, report)
+	if err != nil {
+		return fail(stderr, err)
 	}
-	if nrn := report.Fields["nrn"]; nrn.Expected > 0 && nrn.NormRate < *minNRN {
-		return fmt.Errorf("NRN normalized match %.2f is below the %.2f gate", nrn.NormRate, *minNRN)
+	builtIn := eval.GateFile{
+		Version: "extraction-defaults-v1", Component: eval.ComponentExtraction,
+		Thresholds: map[string]eval.Threshold{
+			"fabricated_nrn": {Max: floatPointer(0)},
+		},
 	}
-	return nil
+	if metric, ok := report.Metrics["field.nrn.normalized"]; ok && metric.Total > 0 {
+		builtIn.Thresholds["field.nrn.normalized"] = eval.Threshold{Min: minNRN}
+	}
+	failures = append(failures, builtIn.Evaluate(report)...)
+	if code := emit(report, *outDir, *asJSON, stdout, stderr); code != 0 {
+		return code
+	}
+	return gateExit(failures, stderr)
 }
+
+func runRetrieval(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("retrieval", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	setPath := flags.String("file", "", "labelled retrieval eval YAML")
+	k := flags.Int("k", rag.DefaultSearchLimit, "passages retrieved per question")
+	gatesPath := flags.String("gates", "", "gate file (optional)")
+	outDir := flags.String("out-dir", "", "directory for JSON and Markdown reports (optional)")
+	asJSON := flags.Bool("json", false, "print the JSON report instead of Markdown")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if *setPath == "" {
+		fmt.Fprintln(stderr, "eval: retrieval requires -file")
+		return 2
+	}
+	setBytes, err := os.ReadFile(*setPath)
+	if err != nil {
+		return fail(stderr, fmt.Errorf("eval: read retrieval set: %w", err))
+	}
+	set, err := rag.LoadEvalSet(*setPath)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return fail(stderr, err)
+	}
+	embedder, err := rag.NewEmbedder(cfg.Embeddings)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	pool, err := db.Open(cfg.Database)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	defer pool.Close()
+
+	store := rag.NewStore(pool)
+	source, err := rag.Evaluate(context.Background(), store, embedder, store, set, rag.EvalOptions{K: *k})
+	if err != nil {
+		return fail(stderr, err)
+	}
+	report := eval.RetrievalReport(filepath.Base(*setPath), set.Version,
+		eval.HashBytes(setBytes), embedder.Model(), now(), source)
+
+	failures, err := loadGates(*gatesPath, report)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	if code := emit(report, *outDir, *asJSON, stdout, stderr); code != 0 {
+		return code
+	}
+	return gateExit(failures, stderr)
+}
+
+func loadGates(path string, report eval.Report) ([]eval.GateFailure, error) {
+	if path == "" {
+		return nil, nil
+	}
+	gates, err := eval.LoadGates(path)
+	if err != nil {
+		return nil, err
+	}
+	return gates.Evaluate(report), nil
+}
+
+func emit(report eval.Report, outDir string, asJSON bool, stdout, stderr io.Writer) int {
+	if err := report.Validate(); err != nil {
+		return fail(stderr, err)
+	}
+	if outDir != "" {
+		base := filepath.Join(outDir, reportFilename(report))
+		if err := report.WriteJSON(base + ".json"); err != nil {
+			return fail(stderr, err)
+		}
+		if err := report.WriteMarkdown(base + ".md"); err != nil {
+			return fail(stderr, err)
+		}
+	}
+	if asJSON {
+		encoded, err := report.JSON()
+		if err != nil {
+			return fail(stderr, err)
+		}
+		_, _ = stdout.Write(encoded)
+		return 0
+	}
+	rendered, err := report.Markdown()
+	if err != nil {
+		return fail(stderr, err)
+	}
+	fmt.Fprint(stdout, rendered)
+	return 0
+}
+
+func gateExit(failures []eval.GateFailure, stderr io.Writer) int {
+	if len(failures) == 0 {
+		return 0
+	}
+	fmt.Fprintf(stderr, "eval: %d release gate(s) failed:\n", len(failures))
+	for _, failure := range failures {
+		fmt.Fprintf(stderr, "  - %s\n", failure.String())
+	}
+	return 1
+}
+
+func fail(stderr io.Writer, err error) int {
+	fmt.Fprintln(stderr, "eval: "+err.Error())
+	return 1
+}
+
+func reportFilename(report eval.Report) string {
+	parts := []string{string(report.Component), report.Dataset, report.DatasetVersion}
+	if report.Split != "" {
+		parts = append(parts, string(report.Split))
+	}
+	return sanitize(strings.Join(parts, "-"))
+}
+
+func sanitize(value string) string {
+	var builder strings.Builder
+	lastDash := false
+	for _, r := range strings.ToLower(value) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			builder.WriteRune(r)
+			lastDash = false
+		default:
+			if !lastDash {
+				builder.WriteByte('-')
+				lastDash = true
+			}
+		}
+	}
+	return strings.Trim(builder.String(), "-")
+}
+
+func floatPointer(value float64) *float64 { return &value }
+
+// now is a seam for deterministic tests.
+var now = func() time.Time { return time.Now() }
 
 func extractCase(ctx context.Context, provider vision.Provider, maxDimension int, baseDir string, evalCase vision.EvalCase) (vision.LabelData, error) {
 	labels := make([]vision.RawLabel, 0, len(evalCase.Images))
@@ -118,23 +364,16 @@ func extractCase(ctx context.Context, provider vision.Provider, maxDimension int
 	return label, nil
 }
 
-func printReport(name string, report vision.EvalReport) {
-	fmt.Printf("eval set: %s\ncases: %d\nfabricated NRNs: %d\n", name, report.Cases, report.FabricatedNRN)
-
-	fields := make([]string, 0, len(report.Fields))
-	for field := range report.Fields {
-		fields = append(fields, field)
+// finishReport writes the report, then reports gate failures. A gate failure
+// exits non-zero even though the report was written, so a CI step cannot miss
+// it.
+func finishReport(report eval.Report, gatesPath, outDir string, asJSON bool, stdout, stderr io.Writer) int {
+	failures, err := loadGates(gatesPath, report)
+	if err != nil {
+		return fail(stderr, err)
 	}
-	sort.Strings(fields)
-	for _, field := range fields {
-		score := report.Fields[field]
-		fmt.Printf("  %-14s expected %3d  exact %5.1f%%  normalized %5.1f%%\n",
-			field, score.Expected, score.ExactRate*100, score.NormRate*100)
+	if code := emit(report, outDir, asJSON, stdout, stderr); code != 0 {
+		return code
 	}
-	if len(report.Failures) > 0 {
-		fmt.Println("failures:")
-		for _, failure := range report.Failures {
-			fmt.Println("  - " + failure)
-		}
-	}
+	return gateExit(failures, stderr)
 }

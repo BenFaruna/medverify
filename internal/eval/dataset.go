@@ -261,6 +261,11 @@ func hash(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// HashBytes returns the SHA-256 hex digest used in report headers. Callers that
+// load a manifest with their own decoder use this so the report still names the
+// exact bytes that were scored.
+func HashBytes(data []byte) string { return hash(data) }
+
 // SplitCounts returns case counts per split, for dataset hygiene tests and
 // report headers.
 func (d Dataset) SplitCounts() map[Split]int {
