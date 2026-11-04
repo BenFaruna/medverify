@@ -99,8 +99,11 @@ type Result struct {
 
 // Scan is a scan with its images and optional result.
 type Scan struct {
-	ID           uuid.UUID
-	ClientKey    string
+	ID        uuid.UUID
+	ClientKey string
+	// APIClientID names the owning api_clients row. It is nil for scans created
+	// in the legacy single-key mode, which has no client row.
+	APIClientID  *int64
 	Status       Status
 	Language     string
 	LocationCell string

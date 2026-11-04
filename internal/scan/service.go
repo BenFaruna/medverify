@@ -41,6 +41,13 @@ type SafetyChecker interface {
 	Check(ctx context.Context, match verify.MatchResult, label vision.LabelData) ([]safety.Flag, error)
 }
 
+// CompletionNotifier is told when a scan reaches a terminal state. It runs after
+// the result is stored, so a failure here can never lose a result or fail a
+// scan; the caller logs it and moves on.
+type CompletionNotifier interface {
+	ScanCompleted(ctx context.Context, scanned Scan) error
+}
+
 // ServiceOptions configures the scan pipeline.
 type ServiceOptions struct {
 	Store    *Store
@@ -49,6 +56,8 @@ type ServiceOptions struct {
 	Recorder vision.Recorder
 	Matcher  RegistryMatcher
 	Safety   SafetyChecker
+	// Notifier receives completion events. Nil disables notifications.
+	Notifier CompletionNotifier
 	// Rules is the versioned verdict configuration. When nil no verdict is
 	// computed, which keeps earlier phases' tests and deployments unchanged.
 	Rules             *verdict.Rules
@@ -71,6 +80,7 @@ type Service struct {
 	recorder          vision.Recorder
 	matcher           RegistryMatcher
 	safety            SafetyChecker
+	notifier          CompletionNotifier
 	rules             *verdict.Rules
 	enqueuer          Enqueuer
 	logger            *slog.Logger
@@ -116,6 +126,7 @@ func NewService(opts ServiceOptions) (*Service, error) {
 		recorder:          opts.Recorder,
 		matcher:           opts.Matcher,
 		safety:            opts.Safety,
+		notifier:          opts.Notifier,
 		rules:             opts.Rules,
 		enqueuer:          opts.Enqueuer,
 		logger:            logger,
@@ -500,6 +511,30 @@ func (s *Service) finish(ctx context.Context, id uuid.UUID, status Status, resul
 	if !updated {
 		s.logger.WarnContext(ctx, "scan was already finished by another worker",
 			slog.String("scan_id", id.String()),
+		)
+		return
+	}
+	s.notifyCompleted(ctx, id)
+}
+
+// notifyCompleted emits the completion event. A notification failure is logged
+// and dropped: a webhook is a convenience, not part of the result.
+func (s *Service) notifyCompleted(ctx context.Context, id uuid.UUID) {
+	if s.notifier == nil {
+		return
+	}
+	scanned, err := s.store.GetScan(ctx, id)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "could not load scan for completion event",
+			slog.String("scan_id", id.String()),
+			slog.Any("err", err),
+		)
+		return
+	}
+	if err := s.notifier.ScanCompleted(ctx, scanned); err != nil {
+		s.logger.ErrorContext(ctx, "scan completion notification failed",
+			slog.String("scan_id", id.String()),
+			slog.Any("err", err),
 		)
 	}
 }

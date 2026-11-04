@@ -55,6 +55,17 @@ type Config struct {
 	Verdict    Verdict
 	Embeddings Embeddings
 	Assistant  Assistant
+	Webhook    Webhook
+}
+
+// Webhook holds outbound delivery settings. A per-endpoint secret signs each
+// payload; retries use exponential backoff until the attempt limit, then the
+// delivery is dead-lettered for replay.
+type Webhook struct {
+	// Interval is how often the worker drains due deliveries.
+	Interval time.Duration
+	// Timeout bounds a single delivery attempt.
+	Timeout time.Duration
 }
 
 // HTTP holds the HTTP server settings.
@@ -356,6 +367,10 @@ func LoadFrom(environ []string) (Config, error) {
 			BackfillLimit: l.positiveInt("EMBEDDINGS_BACKFILL_LIMIT", 50),
 			Delay:         l.duration("EMBEDDINGS_DELAY", 0),
 			IndexInterval: l.duration("EMBEDDINGS_INDEX_INTERVAL", 0),
+		},
+		Webhook: Webhook{
+			Interval: l.duration("WEBHOOK_INTERVAL", 15*time.Second),
+			Timeout:  l.duration("WEBHOOK_TIMEOUT", 10*time.Second),
 		},
 		Assistant: Assistant{
 			Provider:         l.oneOf("ASSISTANT_LLM_PROVIDER", "fake", "fake", "claude"),

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/benfaruna/medverify/internal/llm"
 	"github.com/benfaruna/medverify/internal/platform/config"
@@ -26,12 +27,35 @@ import (
 	"github.com/benfaruna/medverify/internal/verdict"
 	"github.com/benfaruna/medverify/internal/verify"
 	"github.com/benfaruna/medverify/internal/vision/visioncfg"
+	"github.com/benfaruna/medverify/internal/webhook"
 )
 
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "worker: "+err.Error())
 		os.Exit(1)
+	}
+}
+
+// runWebhookDispatcher drains due webhook deliveries until the process stops.
+// One failed batch is logged and retried on the next tick rather than killing
+// the worker.
+func runWebhookDispatcher(ctx context.Context, dispatcher *webhook.Dispatcher, interval time.Duration, logger *slog.Logger) {
+	if interval <= 0 {
+		interval = 15 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if _, err := dispatcher.RunOnce(ctx); err != nil {
+				logger.ErrorContext(ctx, "webhook dispatch pass failed", slog.Any("err", err))
+			}
+		}
 	}
 }
 
@@ -114,6 +138,10 @@ func run() error {
 		return err
 	}
 
+	// Webhook delivery lives in the worker: the API only enqueues scans, and a
+	// slow customer endpoint must never hold an HTTP request open.
+	webhookStore := webhook.NewDBStore(pool)
+
 	scanService, err := scan.NewService(scan.ServiceOptions{
 		Store:     scan.NewStore(pool),
 		Objects:   objects,
@@ -121,6 +149,7 @@ func run() error {
 		Recorder:  llm.NewRecorder(pool),
 		Matcher:   matcher,
 		Safety:    checker,
+		Notifier:  &webhook.Notifier{Store: webhookStore, Logger: logger},
 		Rules:     &rules,
 		Logger:    logger,
 		MaxImages: cfg.Scan.MaxImages,
@@ -152,6 +181,15 @@ func run() error {
 		logger:   logger,
 	}))
 	clientOpts = append(clientOpts, jobs.WithPeriodicJobs(jobs.RAGIndexPeriodicJob(cfg.Embeddings)))
+
+	// The dispatcher drains due deliveries on its own ticker. It shares the
+	// worker's lifetime and stops with it.
+	dispatcher := &webhook.Dispatcher{
+		Store:  webhookStore,
+		Sender: webhook.NewSender(cfg.Webhook.Timeout),
+		Logger: logger,
+	}
+	go runWebhookDispatcher(ctx, dispatcher, cfg.Webhook.Interval, logger)
 
 	client, err := jobs.NewClient(pool, logger, jobs.NewWorkers(logger, workerOpts...), cfg.Jobs, clientOpts...)
 	if err != nil {

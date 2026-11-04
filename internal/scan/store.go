@@ -323,6 +323,7 @@ func scanFromRow(row dbgen.Scan) Scan {
 	scan := Scan{
 		ID:          row.ID,
 		ClientKey:   row.ClientKey,
+		APIClientID: optionalID(row.ApiClientID),
 		Status:      Status(row.Status),
 		CreatedAt:   row.CreatedAt,
 		UpdatedAt:   row.UpdatedAt,
@@ -419,6 +420,15 @@ func valueOrEmpty(value *string) string {
 		return ""
 	}
 	return *value
+}
+
+// optionalID maps a nullable id column back to an optional Go value.
+func optionalID(value pgtype.Int8) *int64 {
+	if !value.Valid {
+		return nil
+	}
+	id := value.Int64
+	return &id
 }
 
 // optionalInt8 maps an optional database id onto the nullable column type.
