@@ -51,6 +51,12 @@ commands:
   sync leaflets [--limit N]
                         download, extract, and split pending leaflets
   registry report       show ingestion counts, recent runs, and OCR needs
+  apikey create --client <name> [--scopes a,b] [--sandbox] [--expires 720h]
+                [--rate N] [--daily-requests N] [--daily-scans N]
+                        create a client if needed and show its key once
+  apikey list           list key prefixes with client, state, and usage dates
+  apikey revoke <key|prefix>
+                        revoke every active key matching the prefix
   watchlist import <file.csv> [--dry-run]
                         validate and load reviewed watchlist entries
   watchlist list [--all] [--stale]
@@ -109,6 +115,8 @@ func run(args []string) error {
 		return syncCommand(ctx, cfg, args[1:])
 	case "registry":
 		return registryCommand(ctx, cfg, args[1:])
+	case "apikey":
+		return apikeyCommand(ctx, cfg, args[1:])
 	case "watchlist":
 		return watchlistCommand(ctx, cfg, args[1:])
 	case "verdict":
