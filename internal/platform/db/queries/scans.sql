@@ -2,8 +2,8 @@
 -- compiles it.
 
 -- name: CreateScan :one
-INSERT INTO scans (id, client_key, api_client_id, language, location_cell)
-VALUES (@id, @client_key, sqlc.narg('api_client_id'), sqlc.narg('language'), sqlc.narg('location_cell'))
+INSERT INTO scans (id, client_key, api_client_id, language, location_cell, sandbox)
+VALUES (@id, @client_key, sqlc.narg('api_client_id'), sqlc.narg('language'), sqlc.narg('location_cell'), @sandbox)
 RETURNING *;
 
 -- name: InsertScanImage :one

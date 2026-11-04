@@ -31,9 +31,9 @@ func (q *Queries) ClaimScan(ctx context.Context, id uuid.UUID) (int64, error) {
 
 const createScan = `-- name: CreateScan :one
 
-INSERT INTO scans (id, client_key, api_client_id, language, location_cell)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, client_key, status, language, location_cell, created_at, updated_at, completed_at, api_client_id
+INSERT INTO scans (id, client_key, api_client_id, language, location_cell, sandbox)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, client_key, status, language, location_cell, created_at, updated_at, completed_at, api_client_id, sandbox
 `
 
 type CreateScanParams struct {
@@ -42,6 +42,7 @@ type CreateScanParams struct {
 	ApiClientID  pgtype.Int8 `json:"api_client_id"`
 	Language     *string     `json:"language"`
 	LocationCell *string     `json:"location_cell"`
+	Sandbox      bool        `json:"sandbox"`
 }
 
 // Queries for the scan pipeline (phase 03). Hand-written SQL only; sqlc
@@ -53,6 +54,7 @@ func (q *Queries) CreateScan(ctx context.Context, arg CreateScanParams) (Scan, e
 		arg.ApiClientID,
 		arg.Language,
 		arg.LocationCell,
+		arg.Sandbox,
 	)
 	var i Scan
 	err := row.Scan(
@@ -65,6 +67,7 @@ func (q *Queries) CreateScan(ctx context.Context, arg CreateScanParams) (Scan, e
 		&i.UpdatedAt,
 		&i.CompletedAt,
 		&i.ApiClientID,
+		&i.Sandbox,
 	)
 	return i, err
 }
@@ -116,7 +119,7 @@ func (q *Queries) GetIdempotencyKey(ctx context.Context, arg GetIdempotencyKeyPa
 }
 
 const getScan = `-- name: GetScan :one
-SELECT id, client_key, status, language, location_cell, created_at, updated_at, completed_at, api_client_id FROM scans WHERE id = $1
+SELECT id, client_key, status, language, location_cell, created_at, updated_at, completed_at, api_client_id, sandbox FROM scans WHERE id = $1
 `
 
 func (q *Queries) GetScan(ctx context.Context, id uuid.UUID) (Scan, error) {
@@ -132,6 +135,7 @@ func (q *Queries) GetScan(ctx context.Context, id uuid.UUID) (Scan, error) {
 		&i.UpdatedAt,
 		&i.CompletedAt,
 		&i.ApiClientID,
+		&i.Sandbox,
 	)
 	return i, err
 }

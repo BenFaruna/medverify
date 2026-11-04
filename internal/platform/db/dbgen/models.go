@@ -158,6 +158,7 @@ type Scan struct {
 	UpdatedAt    time.Time   `json:"updated_at"`
 	CompletedAt  *time.Time  `json:"completed_at"`
 	ApiClientID  pgtype.Int8 `json:"api_client_id"`
+	Sandbox      bool        `json:"sandbox"`
 }
 
 type ScanImage struct {

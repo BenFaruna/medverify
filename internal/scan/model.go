@@ -103,7 +103,9 @@ type Scan struct {
 	ClientKey string
 	// APIClientID names the owning api_clients row. It is nil for scans created
 	// in the legacy single-key mode, which has no client row.
-	APIClientID  *int64
+	APIClientID *int64
+	// Sandbox marks a scan that returns a fixed result with no provider call.
+	Sandbox      bool
 	Status       Status
 	Language     string
 	LocationCell string
@@ -134,8 +136,11 @@ type VerdictView struct {
 // It is the public contract: no numeric score, no internal row IDs, and no
 // wording that calls a medicine safe, genuine, or authentic.
 type View struct {
-	ID          string             `json:"id"`
-	Status      Status             `json:"status"`
+	ID     string `json:"id"`
+	Status Status `json:"status"`
+	// Sandbox marks a fixed response produced without a provider call, so a
+	// client can label it instead of presenting it as a real check.
+	Sandbox     bool               `json:"sandbox"`
 	Verdict     *VerdictView       `json:"verdict"`
 	Reasons     []verdict.Rendered `json:"reasons"`
 	Extracted   json.RawMessage    `json:"extracted"`
@@ -153,6 +158,7 @@ func (s Scan) View(reasons *verdict.Catalog) View {
 	view := View{
 		ID:          s.ID.String(),
 		Status:      s.Status,
+		Sandbox:     s.Sandbox,
 		Reasons:     []verdict.Rendered{},
 		Flags:       json.RawMessage("[]"),
 		Disclaimer:  Disclaimer,

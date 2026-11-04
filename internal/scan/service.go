@@ -142,8 +142,11 @@ func NewService(opts ServiceOptions) (*Service, error) {
 // CreateRequest is one validated upload request. ClientKey is the non-secret
 // tenant key; APIClientID is the owning api_clients row when one exists.
 type CreateRequest struct {
-	ClientKey      string
-	APIClientID    *int64
+	ClientKey   string
+	APIClientID *int64
+	// Sandbox marks a scan that returns a fixed result and never calls a
+	// provider. It is set from the authenticated key, never from the request.
+	Sandbox        bool
 	IdempotencyKey string
 	RequestHash    string
 	Language       string
@@ -210,6 +213,7 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (Scan, bool
 		ID:             scanID,
 		ClientKey:      request.ClientKey,
 		APIClientID:    request.APIClientID,
+		Sandbox:        request.Sandbox,
 		IdempotencyKey: request.IdempotencyKey,
 		RequestHash:    request.RequestHash,
 		Language:       request.Language,
@@ -311,6 +315,10 @@ func (s *Service) Process(ctx context.Context, rawID string) error {
 	if err != nil {
 		return err
 	}
+	if scan.Sandbox {
+		return s.completeSandbox(ctx, scan)
+	}
+
 	switch scan.Status {
 	case StatusCompleted, StatusUnreadable:
 		// Idempotent replay of a job that already finished.

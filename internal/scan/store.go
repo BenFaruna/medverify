@@ -46,6 +46,7 @@ type CreateInput struct {
 	ID             uuid.UUID
 	ClientKey      string
 	APIClientID    *int64
+	Sandbox        bool
 	IdempotencyKey string
 	RequestHash    string
 	Language       string
@@ -68,6 +69,7 @@ func (s *Store) CreateScan(ctx context.Context, input CreateInput) (Scan, bool, 
 		ID:           input.ID,
 		ClientKey:    input.ClientKey,
 		ApiClientID:  optionalInt8(input.APIClientID),
+		Sandbox:      input.Sandbox,
 		Language:     optional(input.Language),
 		LocationCell: optional(input.LocationCell),
 	})
@@ -324,6 +326,7 @@ func scanFromRow(row dbgen.Scan) Scan {
 		ID:          row.ID,
 		ClientKey:   row.ClientKey,
 		APIClientID: optionalID(row.ApiClientID),
+		Sandbox:     row.Sandbox,
 		Status:      Status(row.Status),
 		CreatedAt:   row.CreatedAt,
 		UpdatedAt:   row.UpdatedAt,

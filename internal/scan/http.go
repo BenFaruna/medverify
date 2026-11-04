@@ -119,6 +119,7 @@ func (h *HTTPHandler) Create(w http.ResponseWriter, r *http.Request) {
 	scan, created, err := h.service.Create(createCtx, CreateRequest{
 		ClientKey:      principal.TenantKey(),
 		APIClientID:    optionalClientID(principal),
+		Sandbox:        principal.Sandbox,
 		IdempotencyKey: upload.idempotencyKey,
 		RequestHash:    requestHash,
 		Language:       upload.language,

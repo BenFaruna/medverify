@@ -596,7 +596,7 @@ components:
             storage: ok
     Scan:
       type: object
-      required: [id, status, verdict, reasons, extracted, flags, disclaimer, created_at]
+      required: [id, status, sandbox, verdict, reasons, extracted, flags, disclaimer, created_at]
       properties:
         id:
           type: string
@@ -607,6 +607,12 @@ components:
           description: |
             `unreadable` means the images could not be read confidently; ask
             for a better photo. It never means the medicine is fake.
+        sandbox:
+          type: boolean
+          description: |
+            True for a fixed response produced with a sandbox key. No provider
+            was called and the result was not derived from the photos. Label it
+            in a client instead of presenting it as a real check.
         verdict:
           allOf:
             - $ref: "#/components/schemas/PublicVerdict"
@@ -667,6 +673,7 @@ components:
       example:
         id: 0f9d8c2e-6a1f-4c69-9f4d-0f1f6b2c9a11
         status: completed
+        sandbox: false
         verdict:
           value: consistent_with_records
           confidence: high
