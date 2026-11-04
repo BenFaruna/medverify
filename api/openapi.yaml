@@ -6,11 +6,16 @@ info:
     MedVerify NG checks a photographed medicine pack against NAFDAC records and
     a curated watchlist, then returns an explainable verdict.
 
-    Phase 1 exposes operational endpoints only. Every error response uses
-    RFC 7807 problem details with a stable `code` field; clients branch on
-    `code`, never on `detail`.
+    Every error response uses RFC 7807 problem details with a stable `code`
+    field; clients branch on `code`, never on `detail`.
 
-    The API never declares a medicine safe, genuine, or authentic.
+    Authentication is a per-client API key sent in `X-API-Key`. Keys carry
+    scopes and per-client rate limits and daily quotas, all enforced server
+    side. Failed attempts are not reported in the body beyond
+    `unauthorized`, so a key cannot be probed for.
+
+    The API never declares a medicine safe, genuine, or authentic, never
+    describes one as fake, and never returns a numeric score.
 servers:
   - url: http://localhost:8080
     description: Local docker compose stack
@@ -37,6 +42,10 @@ paths:
           headers:
             X-Request-Id:
               $ref: "#/components/headers/X-Request-Id"
+            RateLimitLimit:
+              $ref: "#/components/headers/RateLimitLimit"
+            RateLimitRemaining:
+              $ref: "#/components/headers/RateLimitRemaining"
           content:
             application/json:
               schema:
@@ -56,6 +65,10 @@ paths:
           headers:
             X-Request-Id:
               $ref: "#/components/headers/X-Request-Id"
+            RateLimitLimit:
+              $ref: "#/components/headers/RateLimitLimit"
+            RateLimitRemaining:
+              $ref: "#/components/headers/RateLimitRemaining"
             Cache-Control:
               description: Always `no-store`; readiness is never cached.
               schema:
@@ -69,6 +82,10 @@ paths:
           headers:
             X-Request-Id:
               $ref: "#/components/headers/X-Request-Id"
+            RateLimitLimit:
+              $ref: "#/components/headers/RateLimitLimit"
+            RateLimitRemaining:
+              $ref: "#/components/headers/RateLimitRemaining"
           content:
             application/problem+json:
               schema:
@@ -141,6 +158,10 @@ paths:
                 type: string
             X-Request-Id:
               $ref: "#/components/headers/X-Request-Id"
+            RateLimitLimit:
+              $ref: "#/components/headers/RateLimitLimit"
+            RateLimitRemaining:
+              $ref: "#/components/headers/RateLimitRemaining"
           content:
             application/json:
               schema:
@@ -154,6 +175,10 @@ paths:
                 type: string
             X-Request-Id:
               $ref: "#/components/headers/X-Request-Id"
+            RateLimitLimit:
+              $ref: "#/components/headers/RateLimitLimit"
+            RateLimitRemaining:
+              $ref: "#/components/headers/RateLimitRemaining"
           content:
             application/json:
               schema:
@@ -165,7 +190,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
         "401":
-          description: Missing or invalid API key.
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/InsufficientScope"
+        "429":
+          description: |
+            Rate limited, or the daily quota for this key is used up. The
+            problem code distinguishes `rate_limited` from `quota_exceeded`.
+          headers:
+            RetryAfter:
+              $ref: "#/components/headers/RetryAfter"
           content:
             application/problem+json:
               schema:
@@ -204,11 +238,31 @@ paths:
             type: string
             format: uuid
       responses:
+        "429":
+          description: |
+            The key (or its calling address) is over its rate limit, or the key
+            has used its daily quota. The problem code distinguishes
+            `rate_limited` from `quota_exceeded`.
+          headers:
+            RetryAfter:
+              $ref: "#/components/headers/RetryAfter"
+            RateLimitLimit:
+              $ref: "#/components/headers/RateLimitLimit"
+            RateLimitRemaining:
+              $ref: "#/components/headers/RateLimitRemaining"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "200":
           description: Current scan state. Result fields are null until later phases fill them.
           headers:
             X-Request-Id:
               $ref: "#/components/headers/X-Request-Id"
+            RateLimitLimit:
+              $ref: "#/components/headers/RateLimitLimit"
+            RateLimitRemaining:
+              $ref: "#/components/headers/RateLimitRemaining"
           content:
             application/json:
               schema:
@@ -220,11 +274,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
         "401":
-          description: Missing or invalid API key.
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/InsufficientScope"
         "404":
           description: No scan exists with this ID.
           content:
@@ -279,6 +331,10 @@ paths:
           headers:
             X-Request-Id:
               $ref: "#/components/headers/X-Request-Id"
+            RateLimitLimit:
+              $ref: "#/components/headers/RateLimitLimit"
+            RateLimitRemaining:
+              $ref: "#/components/headers/RateLimitRemaining"
             Cache-Control:
               description: Always `no-store`; answers are per conversation.
               schema:
@@ -294,11 +350,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
         "401":
-          description: Missing or invalid API key.
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/InsufficientScope"
         "404":
           description: No scan exists with this ID for this API client.
           content:
@@ -324,12 +378,18 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
         "429":
-          description: This conversation reached its turn limit.
+          description: |
+            One of three limits: the key (or its calling address) is over its
+            rate limit, the key has used its daily quota, or this conversation
+            has reached its turn limit. The problem code distinguishes
+            `rate_limited` from `quota_exceeded`.
           headers:
-            Retry-After:
-              description: Seconds before a new conversation may be started.
-              schema:
-                type: integer
+            RetryAfter:
+              $ref: "#/components/headers/RetryAfter"
+            RateLimitLimit:
+              $ref: "#/components/headers/RateLimitLimit"
+            RateLimitRemaining:
+              $ref: "#/components/headers/RateLimitRemaining"
           content:
             application/problem+json:
               schema:
@@ -365,11 +425,31 @@ paths:
             type: string
             format: uuid
       responses:
+        "429":
+          description: |
+            The key (or its calling address) is over its rate limit, or the key
+            has used its daily quota. The problem code distinguishes
+            `rate_limited` from `quota_exceeded`.
+          headers:
+            RetryAfter:
+              $ref: "#/components/headers/RetryAfter"
+            RateLimitLimit:
+              $ref: "#/components/headers/RateLimitLimit"
+            RateLimitRemaining:
+              $ref: "#/components/headers/RateLimitRemaining"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "200":
           description: The stored conversation.
           headers:
             X-Request-Id:
               $ref: "#/components/headers/X-Request-Id"
+            RateLimitLimit:
+              $ref: "#/components/headers/RateLimitLimit"
+            RateLimitRemaining:
+              $ref: "#/components/headers/RateLimitRemaining"
             Cache-Control:
               description: Always `no-store`; the transcript contains user text.
               schema:
@@ -385,11 +465,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
         "401":
-          description: Missing or invalid API key.
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/InsufficientScope"
         "404":
           description: No scan exists with this ID for this API client.
           content:
@@ -409,13 +487,90 @@ components:
       in: header
       name: X-API-Key
       description: |
-        Phase 3 placeholder shared key. Phase 11 replaces it with per-client
-        credentials stored in api_clients.
+        Per-client key in the form `mv_<prefix>_<secret>`. The server looks the
+        key up by its public prefix and compares a SHA-256 hash of the full
+        value in constant time; only the hash is stored. The full key is shown
+        once at creation and cannot be recovered.
+
+        A key carries scopes (`scans:write`, `scans:read`,
+        `questions:write`). A key without the scope for an endpoint receives
+        `403 insufficient_scope`.
+
+        Sandbox keys return fixed responses and never call a provider.
   headers:
     X-Request-Id:
       description: Correlation ID for this request. Echoed from the client when well formed.
       schema:
         type: string
+    RateLimitLimit:
+      description: Requests per minute allowed for this API key.
+      schema:
+        type: integer
+        example: 60
+    RateLimitRemaining:
+      description: Whole requests left in the current second-by-second budget.
+      schema:
+        type: integer
+        example: 57
+    RetryAfter:
+      description: Seconds to wait before retrying. Always present on 429.
+      schema:
+        type: integer
+        minimum: 1
+        example: 12
+  responses:
+    Unauthorized:
+      description: The X-API-Key header is missing, unknown, revoked, or expired.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    InsufficientScope:
+      description: The key authenticated but does not carry the required scope.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          example:
+            type: https://medverify.ng/problems/insufficient_scope
+            title: Forbidden
+            status: 403
+            detail: The API key does not have permission to perform this action.
+            code: insufficient_scope
+    RateLimited:
+      description: Too many requests for this key or this calling address.
+      headers:
+        RetryAfter:
+          $ref: "#/components/headers/RetryAfter"
+        RateLimitLimit:
+          $ref: "#/components/headers/RateLimitLimit"
+        RateLimitRemaining:
+          $ref: "#/components/headers/RateLimitRemaining"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          example:
+            type: https://medverify.ng/problems/rate_limited
+            title: Too Many Requests
+            status: 429
+            detail: Too many requests. Retry after the number of seconds in the Retry-After header.
+            code: rate_limited
+    QuotaExceeded:
+      description: The key has used its daily allowance for this kind of request.
+      headers:
+        RetryAfter:
+          $ref: "#/components/headers/RetryAfter"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          example:
+            type: https://medverify.ng/problems/quota_exceeded
+            title: Too Many Requests
+            status: 429
+            detail: The daily scan quota for this API key is used up.
+            code: quota_exceeded
   schemas:
     HealthResponse:
       type: object
@@ -441,7 +596,7 @@ components:
             storage: ok
     Scan:
       type: object
-      required: [id, status, verdict, reasons, extracted, flags, created_at]
+      required: [id, status, verdict, reasons, extracted, flags, disclaimer, created_at]
       properties:
         id:
           type: string
@@ -454,19 +609,20 @@ components:
             for a better photo. It never means the medicine is fake.
         verdict:
           allOf:
-            - $ref: "#/components/schemas/Verdict"
+            - $ref: "#/components/schemas/PublicVerdict"
           nullable: true
           description: |
-            Deterministic verdict from phase 07. Null until the scan reaches a
-            terminal state or when the worker has no rules file. It never says
-            a medicine is safe, genuine, or authentic, and it never says one is
-            counterfeit.
+            Deterministic verdict. Null until the scan reaches a terminal state
+            or when the worker has no rules file. It carries no numeric score
+            and never says a medicine is safe, genuine, or authentic, or that
+            one is counterfeit.
         reasons:
           type: array
           description: |
             Reviewed, translatable explanations of the verdict, ordered by
-            importance. Empty when there is no verdict. Display `message`, not
-            `code`.
+            importance. Empty when there is no verdict, and empty for a reason
+            whose wording cannot be completed rather than showing a sentence
+            with a gap. Display `text`, not `code`.
           items:
             $ref: "#/components/schemas/VerdictReason"
         extracted:
@@ -494,6 +650,13 @@ components:
             it came from; it is never a safety or authenticity claim.
           items:
             $ref: "#/components/schemas/SafetyFlag"
+        disclaimer:
+          type: string
+          description: |
+            Fixed text shown with every result. It states that this tool
+            compares packs against NAFDAC records and is not medical advice.
+            It is never generated and never varies per result.
+          example: "MedVerify compares the pack photo with NAFDAC records. It is not medical advice: talk to a pharmacist or doctor about your medicine."
         created_at:
           type: string
           format: date-time
@@ -506,13 +669,12 @@ components:
         status: completed
         verdict:
           value: consistent_with_records
-          score: 12
           confidence: high
           rules_version: verdict-v1
-          reasons:
-            - {code: registry_product_found, message: Report matches a registered product.}
-            - {code: fields_agree, field: nrn, message: The NRN printed on the pack matches the record.}
-        reasons: []
+        reasons:
+          - code: label_consistent
+            text: The details printed on this pack agree with the NAFDAC record found for it.
+        disclaimer: The result compares this pack with NAFDAC records. It does not prove the pack is authentic and it is not medical advice.
         flags: []
         features:
           outcome: matched_consistent
@@ -555,9 +717,12 @@ components:
           prompt_version: v1
         created_at: "2026-11-02T09:00:00Z"
         completed_at: "2026-11-02T09:00:01Z"
-    Verdict:
+    PublicVerdict:
       type: object
-      required: [value, score, confidence, rules_version, reasons]
+      description: |
+        The public verdict. It deliberately has no numeric score: the internal
+        concern ranking would read as a probability.
+      required: [value, confidence, rules_version]
       properties:
         value:
           type: string
@@ -566,37 +731,31 @@ components:
             Closed set. `not_found_in_records` and `mismatch_found` describe
             our reference data, not the physical pack. `unreadable` asks for a
             better photo; it is not a judgement of the medicine.
-        score:
-          type: integer
-          minimum: 0
-          maximum: 100
-          description: |
-            Internal concern ranking used for sorting and review queues. It is
-            never a probability and must not be shown as a percentage.
         confidence:
           type: string
           enum: [low, medium, high]
+          description: Coarse certainty band, never a percentage.
         rules_version:
           type: string
           description: Version of the rules file that produced this verdict.
-        reasons:
-          type: array
-          items:
-            $ref: "#/components/schemas/VerdictReason"
     VerdictReason:
       type: object
-      required: [code, message]
+      required: [code, text]
       properties:
         code:
           type: string
-          description: Stable machine key. Clients must not parse or display it.
-          example: registry_product_found
+          description: |
+            Stable machine key. Clients may branch on it but must not display
+            it: `text` is the reviewed wording.
+          example: not_in_dataset
+        text:
+          type: string
+          description: |
+            Reviewed wording from the reason catalog, in the scan's language.
+            Always display this and never the code.
         field:
           type: string
           description: Label field the reason is about, when it is about one.
-        message:
-          type: string
-          description: Reviewed wording from the reason catalog.
         params:
           type: object
           additionalProperties:
@@ -807,6 +966,11 @@ components:
             $ref: "#/components/schemas/RegistryProductRef"
         fields:
           type: object
+          nullable: true
+          description: |
+            Per-field comparison, keyed by field name. Null when nothing could
+            be compared, for example on unreadable input; treat null and an
+            empty object the same way.
           additionalProperties:
             $ref: "#/components/schemas/FieldComparison"
         registry_status:
@@ -1080,12 +1244,14 @@ components:
             - conflict
             - corrupt_image
             - image_too_large
+            - insufficient_scope
             - internal_error
             - invalid_language
             - invalid_location
             - method_not_allowed
             - not_found
             - payload_too_large
+            - quota_exceeded
             - rate_limited
             - timeout
             - too_many_images
