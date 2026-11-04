@@ -19,6 +19,8 @@ tags:
     description: Liveness and readiness probes
   - name: scans
     description: Upload pack photos asynchronously and read the result
+  - name: assistant
+    description: Ask grounded questions about one scanned pack
 
 paths:
   /healthz:
@@ -225,6 +227,177 @@ paths:
                 $ref: "#/components/schemas/Problem"
         "404":
           description: No scan exists with this ID.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/scans/{id}/questions:
+    post:
+      operationId: askScanQuestion
+      summary: Ask a grounded question about one scan
+      description: |
+        Answers only from the NAFDAC registry record, sourced safety flags, and
+        leaflet passages stored for this scan. Every factual claim carries a
+        numbered citation whose source is returned in `sources`. The question
+        text is stored in the transcript for review but is never logged.
+
+        The endpoint never gives medical advice, a diagnosis, or personal
+        dosing. Those questions return a fixed refusal template with
+        `verified: false` and no sources. If the sources do not contain the
+        answer, it returns the fixed not-found template. A model failure returns
+        503 with `Retry-After`; it never returns a partial answer.
+      tags: [assistant]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Scan UUID returned by the upload.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              additionalProperties: false
+              properties:
+                question:
+                  type: string
+                  minLength: 1
+                  maxLength: 1000
+                  description: Free text question about this pack.
+      responses:
+        "200":
+          description: |
+            A verified, cited answer, a fixed refusal, or a fixed fallback.
+            Check `verified` and `fallback`; do not treat fixed text as grounded.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+            Cache-Control:
+              description: Always `no-store`; answers are per conversation.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssistantAnswer"
+        "400":
+          description: The ID is not a UUID, or the body is not a JSON question.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: No scan exists with this ID for this API client.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The scan has not finished and cannot answer questions yet.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The conversation expired or was removed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The question is empty or longer than the configured limit.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: This conversation reached its turn limit.
+          headers:
+            Retry-After:
+              description: Seconds before a new conversation may be started.
+              schema:
+                type: integer
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The assistant provider is temporarily unavailable.
+          headers:
+            Retry-After:
+              description: Suggested retry delay in seconds.
+              schema:
+                type: integer
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/scans/{id}/conversation:
+    get:
+      operationId: getScanConversation
+      summary: Read the stored question transcript for a scan
+      description: |
+        Returns the stored turns for this scan's conversation. The transcript is
+        scoped to the scan and the API client. It contains the user's question
+        text, so the response is never cached.
+      tags: [assistant]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Scan UUID returned by the upload.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The stored conversation.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+            Cache-Control:
+              description: Always `no-store`; the transcript contains user text.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssistantConversation"
+        "400":
+          description: The ID is not a UUID.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: No scan exists with this ID for this API client.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The conversation expired or has not been started.
           content:
             application/problem+json:
               schema:
@@ -737,6 +910,141 @@ components:
           maximum: 1
         source:
           type: integer
+    AssistantAnswer:
+      type: object
+      description: |
+        One answered or fixed turn. `verified` is true only when the model's
+        claims passed both verification passes. `fallback` is true when the fixed
+        text was returned instead of a verified answer. Neither value is a
+        judgement about the medicine.
+      required: [conversation_id, turn, answer, sources, intent, language, verified]
+      properties:
+        conversation_id:
+          type: string
+          format: uuid
+        turn:
+          type: integer
+          minimum: 1
+        answer:
+          type: string
+          description: |
+            Verified cited text or a fixed refusal/fallback. A claim's citations
+            appear as `[1]`, `[2]`; the matching entries are in `sources`.
+        sources:
+          type: array
+          description: Sources cited by the answer. Empty for refusals and fallbacks.
+          items:
+            $ref: "#/components/schemas/AssistantSource"
+        disclaimer:
+          type: string
+          description: Fixed text shown with a verified answer.
+        intent:
+          type: string
+          description: Closed router intent that selected the policy row.
+          enum:
+            - registration
+            - ingredients
+            - safety_flags
+            - leaflet
+            - indications
+            - personal_safety
+            - dosing
+            - diagnosis
+            - comparison
+            - off_topic
+            - prompt_injection
+            - unknown
+        language:
+          type: string
+          description: Language of the returned fixed text or answer.
+        verified:
+          type: boolean
+          description: True only for a fully verified, cited answer.
+        fallback:
+          type: boolean
+          description: True when a fixed fallback was returned instead of an answer.
+      example:
+        conversation_id: 7d5f8d7e-0f2b-4fb0-9c1a-2b6f3a1d9e42
+        turn: 1
+        answer: >-
+          The leaflet on file says: "Keep out of reach of children." [1]
+        sources:
+          - id: leaflet:9
+            label: "1"
+            kind: leaflet
+            title: Warnings
+            url: https://example.test/leaflets/04-0858.pdf
+            text: Keep out of reach of children.
+        disclaimer: >-
+          This comes from NAFDAC records and the leaflet on file. It is not
+          medical advice.
+        intent: leaflet
+        language: en
+        verified: true
+        fallback: false
+    AssistantSource:
+      type: object
+      required: [id, label, kind]
+      properties:
+        id:
+          type: string
+          description: Stable source identifier used by the verifier.
+        label:
+          type: string
+          description: The bracketed citation number shown in `answer`.
+        kind:
+          type: string
+          enum: [registry_record, safety_flag, leaflet]
+        title:
+          type: string
+        url:
+          type: string
+          format: uri
+        text:
+          type: string
+          description: The exact passage or record text the claim is checked against.
+    AssistantConversation:
+      type: object
+      required: [conversation_id, scan_id, language, expires_at, messages]
+      properties:
+        conversation_id:
+          type: string
+          format: uuid
+        scan_id:
+          type: string
+          format: uuid
+        language:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        messages:
+          type: array
+          items:
+            type: object
+            required: [turn, role, content, created_at]
+            properties:
+              turn:
+                type: integer
+                minimum: 1
+              role:
+                type: string
+                enum: [user, assistant]
+              content:
+                type: string
+              intent:
+                type: string
+              language:
+                type: string
+              sources:
+                type: array
+                items:
+                  type: string
+              verifier:
+                type: string
+              created_at:
+                type: string
+                format: date-time
     Problem:
       type: object
       description: RFC 7807 problem details with a stable machine code.
@@ -778,6 +1086,7 @@ components:
             - method_not_allowed
             - not_found
             - payload_too_large
+            - rate_limited
             - timeout
             - too_many_images
             - unauthorized

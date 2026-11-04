@@ -6,18 +6,18 @@
 
 ## 1. Deliverables checklist
 
-- [ ] LLM interface (Chat with tool calling, Embed) with fake and real implementations
-- [ ] Tables: conversations, messages, tool\_calls (all tied to a scan)
-- [ ] Intent router (small model, JSON output)
-- [ ] Policy gate in plain Go, driven by a policy table
-- [ ] Refusal and fallback templates per language, human-reviewed
-- [ ] Tools: get\_registration, get\_ingredients, get\_safety\_flags, search\_leaflet (all session-pinned)
-- [ ] Orchestrator loop with step, time, and token limits
-- [ ] Verifier: rule checks plus a second-pass support check
-- [ ] Versioned prompt files
-- [ ] Endpoint: POST /v1/scans/{id}/questions and GET /v1/scans/{id}/conversation
-- [ ] Per-turn logging for audit and review (with redaction)
-- [ ] Red-team suite and eval hooks (document 10)
+- [x] LLM interface (Chat with tool calling, Embed) with fake and real implementations
+- [x] Tables: conversations, messages, tool\_calls (all tied to a scan)
+- [x] Intent router (small model, JSON output)
+- [x] Policy gate in plain Go, driven by a policy table
+- [ ] Refusal and fallback templates per language, human-reviewed (draft `en` only, deliberately `reviewed: false`)
+- [x] Tools: get\_registration, get\_ingredients, get\_safety\_flags, search\_leaflet (all session-pinned)
+- [x] Orchestrator loop with step, time, and token limits
+- [x] Verifier: rule checks plus a second-pass support check
+- [x] Versioned prompt files
+- [x] Endpoint: POST /v1/scans/{id}/questions and GET /v1/scans/{id}/conversation
+- [x] Per-turn logging for audit and review (with redaction)
+- [ ] Red-team suite and eval hooks (document 10) — in-repo red-team tests exist; the phase 10 runner and held-out dataset do not
 
 ## 2. Tools needed
 
@@ -138,3 +138,72 @@ type Tool interface {
 - Never relax a policy row or a gate to make a test pass. Report the failing case.
 - Never put leaflet or user text into system prompts or tool schemas.
 - Every new tool must be read-only, session-pinned, and have an isolation test before it is merged.
+
+## 10. Implementation notes
+
+- **LLM seam.** `internal/llm` defines a small tool-calling `Client` with a
+  scripted fake and a Claude Messages implementation. `RecordingClient` writes
+  one `llm_calls` row per call (`kind = 'chat'`); it records scan ID, provider,
+  model, prompt version, latency, usage, and outcome, never prompts, questions,
+  sources, or answers. Error bodies are never echoed into logs.
+- **Persistence.** `migrations/00009_assistant.sql` adds `conversations`,
+  `messages`, and `assistant_tool_calls`, all keyed by scan. `assistant.Store`
+  creates one conversation per scan and writes the user message, assistant
+  message, and every tool audit row in one transaction. A failed insert rolls
+  the turn back.
+- **Policy and templates.** `policy.go` is the reviewed policy table in code.
+  Every intent has exactly one row; answer rows name their tool allowlist and
+  every refusal/fallback row names a fixed template. Unknown or malformed
+  routes can only reach `unknown` → fixed fallback. Templates live in
+  `internal/assistant/templates/en.yaml`, are embedded, validated for
+  completeness and placeholder-free text, and require human review before
+  production startup succeeds.
+- **Tools.** `get_registration`, `get_ingredients`, `get_safety_flags`, and
+  `search_leaflet` take their scan/product scope from the server-side session.
+  Any `product_id`, `nrn`, or `scan_id` supplied by the model is ignored. Absence
+  of a safety flag or an unindexed leaflet is reported as `found: false`, never
+  as a clean bill of health.
+- **Orchestrator.** The loop enforces step, output-token, and tool-call limits
+  in code. `submit_answer` is the only terminal action; plain text, malformed
+  JSON, or an exhausted limit returns a fixed fallback. Provider errors surface
+  to the caller so HTTP can return `503` with `Retry-After`; no partial answer
+  is returned.
+- **Verifier.** Code rules run first: every claim needs an existing source ID,
+  every number must appear in a cited source, and forbidden reassurance or
+  authenticity wording is rejected outside quoted leaflet text. A second-pass
+  small-model check must mark every claim supported. Any failure returns the
+  fixed unsupported fallback; there is no repair attempt.
+- **Router.** The router sees only the question, never registry or leaflet
+  content. Malformed output, an unknown intent, or an unsupported language
+  resolves to the safest row. The question is delimited as data and never
+  copied into the tool call.
+- **HTTP.** `POST /v1/scans/{id}/questions` and
+  `GET /v1/scans/{id}/conversation` are scoped to the scan and the API client
+  key. Questions are stored for review but never logged. Refusals and fallbacks
+  return `200` with fixed text; provider outages return `503`, a spent turn
+  budget returns `429`, and an expired conversation returns `410`.
+- **Tests.** Unit tests cover the policy table, router fallbacks, every tool's
+  pinning, the bounded loop, the verifier's rule and support passes, refusals,
+  not-found, multi-turn pressure, language fallback, indirect leaflet
+  injection, and over-refusal. Integration tests cover transcript and tool-audit
+  persistence, transaction rollback, per-scan isolation, and cross-product
+  leaflet isolation against the real database and pgvector store.
+
+### Open blockers for this phase
+
+1. **Templates are not reviewed.** Only English templates exist and the file is
+   marked `reviewed: false`. Production startup fails by design until a
+   pharmacist and legal reviewer sign off. Native-speaker review for Pidgin,
+   Hausa, Yoruba, and Igbo has not happened.
+2. **Policy sign-off is not recorded.** The policy table matches the phase
+   document, but no pharmacist/project-lead sign-off is on file.
+3. **Dosing relay decision is open.** The default is refuse and link to the
+   leaflet only. Relaying printed dose text has not been approved.
+4. **No held-out red-team corpus.** In-repo tests encode the adversarial cases,
+   but the 150+ question corpus from document 10 and the phase 10 runner are
+   not built, so the release gates cannot be measured.
+5. **Live provider acceptance run not done.** It needs API keys, pinned model
+   IDs, a spending cap, and data-handling approval.
+6. **Retrieval quality is unmeasured.** Phase 08's labelled retrieval set is
+   still absent, so leaflet answers cannot be scored for recall.
+
