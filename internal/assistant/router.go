@@ -85,7 +85,7 @@ func (r *Router) Route(ctx context.Context, question, hintedLanguage string) (Ro
 		if call.Name != routeToolName {
 			continue
 		}
-		if err := json.Unmarshal(call.Input, &payload); err != nil {
+		if !decodeRoute(call.Input, &payload) {
 			return Route{Intent: IntentUnknown, Language: r.language(hintedLanguage), Malformed: true}, nil
 		}
 		found = true
@@ -94,7 +94,7 @@ func (r *Router) Route(ctx context.Context, question, hintedLanguage string) (Ro
 	if !found {
 		// Some providers answer with JSON text even when forced. Accept it only
 		// when it is exactly the expected shape.
-		if err := json.Unmarshal([]byte(strings.TrimSpace(response.Text)), &payload); err != nil {
+		if !decodeRoute([]byte(strings.TrimSpace(response.Text)), &payload) {
 			return Route{Intent: IntentUnknown, Language: r.language(hintedLanguage), Malformed: true}, nil
 		}
 	}
@@ -127,4 +127,12 @@ func (r *Router) SupportedLanguage(language string) bool {
 		}
 	}
 	return false
+}
+
+// decodeRoute reports whether the model's output is the expected JSON shape.
+// A malformed route is a classified outcome, not a failed call: the caller
+// still receives a valid route and the policy layer falls back, so the decode
+// result is a boolean rather than an error.
+func decodeRoute(data []byte, payload any) bool {
+	return json.Unmarshal(data, payload) == nil
 }

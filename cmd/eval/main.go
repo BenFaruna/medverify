@@ -55,7 +55,7 @@ Run "eval <command> -h" for command options.
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprint(stderr, usage)
+		_, _ = fmt.Fprint(stderr, usage)
 		return 2
 	}
 	switch args[0] {
@@ -70,11 +70,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "judge-calibration":
 		return runJudgeCalibration(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
-		fmt.Fprint(stdout, usage)
+		_, _ = fmt.Fprint(stdout, usage)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "eval: unknown command %q\n\n", args[0])
-		fmt.Fprint(stderr, usage)
+		_, _ = fmt.Fprintf(stderr, "eval: unknown command %q\n\n", args[0])
+		_, _ = fmt.Fprint(stderr, usage)
 		return 2
 	}
 }
@@ -93,12 +93,12 @@ func runAssistant(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *datasetDir == "" || *recordedPath == "" {
-		fmt.Fprintln(stderr, "eval: assistant requires -dataset and -recorded")
+		_, _ = fmt.Fprintln(stderr, "eval: assistant requires -dataset and -recorded")
 		return 2
 	}
 	selectedSplit := eval.Split(*split)
 	if !selectedSplit.Valid() {
-		fmt.Fprintf(stderr, "eval: -split must be dev or test, got %q\n", *split)
+		_, _ = fmt.Fprintf(stderr, "eval: -split must be dev or test, got %q\n", *split)
 		return 2
 	}
 
@@ -138,7 +138,7 @@ func runExtraction(args []string, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 	if cfg.Vision.Provider == "fake" {
-		fmt.Fprintln(stderr, "eval: WARNING: VISION_PROVIDER=fake scores a deterministic placeholder, not a model")
+		_, _ = fmt.Fprintln(stderr, "eval: WARNING: VISION_PROVIDER=fake scores a deterministic placeholder, not a model")
 	}
 	provider, err := visioncfg.New(cfg.Vision)
 	if err != nil {
@@ -210,7 +210,7 @@ func runRetrieval(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *setPath == "" {
-		fmt.Fprintln(stderr, "eval: retrieval requires -file")
+		_, _ = fmt.Fprintln(stderr, "eval: retrieval requires -file")
 		return 2
 	}
 	setBytes, err := os.ReadFile(*setPath)
@@ -259,12 +259,12 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *datasetDir == "" {
-		fmt.Fprintln(stderr, "eval: verdict requires -dataset")
+		_, _ = fmt.Fprintln(stderr, "eval: verdict requires -dataset")
 		return 2
 	}
 	selectedSplit := eval.Split(*split)
 	if !selectedSplit.Valid() {
-		fmt.Fprintf(stderr, "eval: -split must be dev or test, got %q\n", *split)
+		_, _ = fmt.Fprintf(stderr, "eval: -split must be dev or test, got %q\n", *split)
 		return 2
 	}
 	rules, err := verdict.LoadRules(*rulesPath)
@@ -294,11 +294,11 @@ func runJudgeCalibration(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *labelsPath == "" || *values == "" {
-		fmt.Fprintln(stderr, "eval: judge-calibration requires -labels and -values")
+		_, _ = fmt.Fprintln(stderr, "eval: judge-calibration requires -labels and -values")
 		return 2
 	}
 	if *minKappa <= 0 || *minCases <= 0 {
-		fmt.Fprintln(stderr, "eval: judge-calibration requires an agreed -min-kappa and -min-cases; do not invent thresholds")
+		_, _ = fmt.Fprintln(stderr, "eval: judge-calibration requires an agreed -min-kappa and -min-cases; do not invent thresholds")
 		return 2
 	}
 	declared := make([]string, 0, 4)
@@ -321,18 +321,18 @@ func runJudgeCalibration(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return fail(stderr, err)
 		}
-		fmt.Fprintln(stdout, string(encoded))
+		_, _ = fmt.Fprintln(stdout, string(encoded))
 	} else {
-		fmt.Fprintf(stdout, "judge calibration: cases=%d kappa=%.4f agreement=%.4f\n",
+		_, _ = fmt.Fprintf(stdout, "judge calibration: cases=%d kappa=%.4f agreement=%.4f\n",
 			calibration.Cases, calibration.Kappa, calibration.Agreement)
 	}
 	failures := calibration.Meets(*minKappa, *minCases)
 	if len(failures) == 0 {
 		return 0
 	}
-	fmt.Fprintln(stderr, "eval: judge is not calibrated for release use:")
+	_, _ = fmt.Fprintln(stderr, "eval: judge is not calibrated for release use:")
 	for _, failure := range failures {
-		fmt.Fprintln(stderr, "  - "+failure)
+		_, _ = fmt.Fprintln(stderr, "  - "+failure)
 	}
 	return 1
 }
@@ -373,7 +373,7 @@ func emit(report eval.Report, outDir string, asJSON bool, stdout, stderr io.Writ
 	if err != nil {
 		return fail(stderr, err)
 	}
-	fmt.Fprint(stdout, rendered)
+	_, _ = fmt.Fprint(stdout, rendered)
 	return 0
 }
 
@@ -381,9 +381,9 @@ func gateExit(failures []eval.GateFailure, stderr io.Writer) int {
 	if len(failures) == 0 {
 		return 0
 	}
-	fmt.Fprintf(stderr, "eval: %d release gate(s) failed:\n", len(failures))
+	_, _ = fmt.Fprintf(stderr, "eval: %d release gate(s) failed:\n", len(failures))
 	for _, failure := range failures {
-		fmt.Fprintf(stderr, "  - %s\n", failure.String())
+		_, _ = fmt.Fprintf(stderr, "  - %s\n", failure.String())
 	}
 	return 1
 }
@@ -393,7 +393,7 @@ func fail(stderr io.Writer, err error) int {
 	if !strings.HasPrefix(message, "eval: ") {
 		message = "eval: " + message
 	}
-	fmt.Fprintln(stderr, message)
+	_, _ = fmt.Fprintln(stderr, message)
 	return 1
 }
 

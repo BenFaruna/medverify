@@ -305,10 +305,7 @@ func (s *Service) Ask(ctx context.Context, request AskRequest) (AnswerView, erro
 	sources := make([]SourceView, 0, len(result.Sources))
 	sourceIDs := make([]string, 0, len(result.Sources))
 	for _, source := range result.Sources {
-		sources = append(sources, SourceView{
-			ID: source.ID, Label: source.Label, Kind: source.Kind,
-			Title: source.Title, URL: source.URL, Text: source.Text,
-		})
+		sources = append(sources, SourceView(source))
 		sourceIDs = append(sourceIDs, source.ID)
 	}
 	record := TurnRecord{

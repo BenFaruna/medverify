@@ -157,7 +157,7 @@ func (r Report) Markdown() (string, error) {
 	b.WriteString("\n## Metrics\n\n| Metric | Value | Count | Unit |\n| --- | ---: | ---: | --- |\n")
 	for _, name := range r.MetricNames() {
 		metric := r.Metrics[name]
-		value := fmt.Sprintf("%.4f", metric.Value)
+		var value string
 		if metric.Unit == "count" {
 			value = fmt.Sprintf("%d", metric.Count)
 		} else {

@@ -176,13 +176,14 @@ func (o *Orchestrator) Answer(ctx context.Context, request AnswerRequest) (Turn,
 		results := make([]llm.ToolResult, 0, len(response.ToolCalls))
 		for _, call := range response.ToolCalls {
 			if call.Name == submitAnswerTool {
-				draft, err := parseDraft(call.Input)
-				if err != nil {
-					turn := fallbackTurn(request.Catalog, TemplateFallbackUnsupported, "malformed_submission")
+				// A malformed submission becomes the fixed fallback; it is not a
+				// failed turn, so the caller still receives a valid answer.
+				if draft, err := parseDraft(call.Input); err == nil {
+					turn := o.finishDraft(ctx, draft, citations, request.Catalog)
 					turn.Steps, turn.ToolCalls, turn.Usage, turn.ToolLogs = step, toolCalls, usage, toolLogs
 					return turn, nil
 				}
-				turn := o.finishDraft(ctx, draft, citations, request.Catalog)
+				turn := fallbackTurn(request.Catalog, TemplateFallbackUnsupported, "malformed_submission")
 				turn.Steps, turn.ToolCalls, turn.Usage, turn.ToolLogs = step, toolCalls, usage, toolLogs
 				return turn, nil
 			}
