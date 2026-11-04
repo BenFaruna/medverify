@@ -112,30 +112,47 @@ type Scan struct {
 	Flags        []safety.Flag
 }
 
-// View is the API response shape. Field names are stable for clients.
-type View struct {
-	ID          string          `json:"id"`
-	Status      Status          `json:"status"`
-	Verdict     json.RawMessage `json:"verdict"`
-	Reasons     json.RawMessage `json:"reasons"`
-	Extracted   json.RawMessage `json:"extracted"`
-	Features    json.RawMessage `json:"features"`
-	Flags       json.RawMessage `json:"flags"`
-	CreatedAt   time.Time       `json:"created_at"`
-	CompletedAt *time.Time      `json:"completed_at"`
+// Disclaimer is shown with every result. It states what the tool does and does
+// not do; it must never turn into advice, and it must never claim a pack is
+// safe, genuine, or authentic.
+const Disclaimer = "MedVerify compares the pack photo with NAFDAC records. It is not medical " +
+	"advice: talk to a pharmacist or doctor about your medicine."
+
+// VerdictView is the public verdict. It deliberately has no numeric score: the
+// internal score is a ranking for analytics and would read as a probability.
+type VerdictView struct {
+	Value        string `json:"value"`
+	Confidence   string `json:"confidence"`
+	RulesVersion string `json:"rules_version"`
 }
 
-// View converts a scan to its API representation. The result never contains
-// advice and never says a medicine is safe or genuine.
-func (s Scan) View() View {
+// View is the API response shape. Field names are stable for clients.
+//
+// It is the public contract: no numeric score, no internal row IDs, and no
+// wording that calls a medicine safe, genuine, or authentic.
+type View struct {
+	ID          string             `json:"id"`
+	Status      Status             `json:"status"`
+	Verdict     *VerdictView       `json:"verdict"`
+	Reasons     []verdict.Rendered `json:"reasons"`
+	Extracted   json.RawMessage    `json:"extracted"`
+	Features    json.RawMessage    `json:"features"`
+	Flags       json.RawMessage    `json:"flags"`
+	Disclaimer  string             `json:"disclaimer"`
+	CreatedAt   time.Time          `json:"created_at"`
+	CompletedAt *time.Time         `json:"completed_at"`
+}
+
+// View converts a scan to its public API representation. reasons supplies the
+// reviewed wording catalog; a nil catalog still returns the stable reason codes
+// but no sentences.
+func (s Scan) View(reasons *verdict.Catalog) View {
 	view := View{
 		ID:          s.ID.String(),
 		Status:      s.Status,
-		Verdict:     nil,
-		Reasons:     json.RawMessage("[]"),
-		Extracted:   nil,
-		Features:    nil,
+		Reasons:     []verdict.Rendered{},
 		Flags:       json.RawMessage("[]"),
+		Disclaimer:  Disclaimer,
 		CreatedAt:   s.CreatedAt,
 		CompletedAt: s.CompletedAt,
 	}
@@ -146,14 +163,14 @@ func (s Scan) View() View {
 		return view
 	}
 	if s.Result.Verdict != nil {
-		if encoded, err := json.Marshal(s.Result.Verdict); err == nil {
-			view.Verdict = encoded
+		view.Verdict = &VerdictView{
+			Value:        string(s.Result.Verdict.Verdict),
+			Confidence:   string(s.Result.Verdict.Confidence),
+			RulesVersion: s.Result.Verdict.RulesVersion,
 		}
-		if encoded, err := json.Marshal(s.Result.Verdict.Reasons); err == nil {
-			view.Reasons = encoded
-		}
-	} else if len(s.Result.Reasons) > 0 {
-		view.Reasons = s.Result.Reasons
+		view.Reasons = renderReasons(reasons, s.Result.Verdict.Reasons)
+	} else {
+		view.Reasons = renderStoredReasons(reasons, s.Result.Reasons)
 	}
 	if len(s.Result.Extracted) > 0 {
 		view.Extracted = s.Result.Extracted
@@ -162,6 +179,31 @@ func (s Scan) View() View {
 		view.Features = s.Result.Features
 	}
 	return view
+}
+
+func renderReasons(catalog *verdict.Catalog, reasons []verdict.Reason) []verdict.Rendered {
+	if len(reasons) == 0 {
+		return []verdict.Rendered{}
+	}
+	if catalog == nil {
+		// Without reviewed wording a reason a client cannot display is better
+		// than a code a client is tempted to print.
+		return []verdict.Rendered{}
+	}
+	return catalog.RenderAll(reasons)
+}
+
+// renderStoredReasons handles results written before the typed verdict existed:
+// the codes are in JSON but there is no parsed result to read.
+func renderStoredReasons(catalog *verdict.Catalog, raw json.RawMessage) []verdict.Rendered {
+	if len(raw) == 0 {
+		return []verdict.Rendered{}
+	}
+	var reasons []verdict.Reason
+	if err := json.Unmarshal(raw, &reasons); err != nil {
+		return []verdict.Rendered{}
+	}
+	return renderReasons(catalog, reasons)
 }
 
 // CoarseCell converts coordinates to a low-precision grid identifier. Only the

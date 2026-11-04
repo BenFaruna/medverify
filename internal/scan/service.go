@@ -266,9 +266,25 @@ func (s *Service) Wait(ctx context.Context, id uuid.UUID) (Scan, bool, error) {
 	}
 }
 
-// Get loads one scan.
+// Get loads one scan without tenant scoping. It is for background work and
+// internal callers; every HTTP path must use GetForTenant so one client cannot
+// read another client's scan.
 func (s *Service) Get(ctx context.Context, id uuid.UUID) (Scan, error) {
 	return s.store.GetScan(ctx, id)
+}
+
+// GetForTenant loads one scan owned by tenantKey. A scan that exists under a
+// different client is reported as ErrScanNotFound, so the response cannot be
+// used to learn that an ID belongs to someone else.
+func (s *Service) GetForTenant(ctx context.Context, id uuid.UUID, tenantKey string) (Scan, error) {
+	scanned, err := s.store.GetScan(ctx, id)
+	if err != nil {
+		return Scan{}, err
+	}
+	if scanned.ClientKey != tenantKey {
+		return Scan{}, ErrScanNotFound
+	}
+	return scanned, nil
 }
 
 // Process runs one extraction attempt. It is safe to call twice: the guarded

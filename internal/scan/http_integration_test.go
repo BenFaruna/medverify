@@ -137,6 +137,16 @@ func mustUUID(t *testing.T, raw string) uuid.UUID {
 	return id
 }
 
+// seedAPIClient inserts one client row with a fixed id.
+func seedAPIClient(t *testing.T, pool *pgxpool.Pool, id int64) {
+	t.Helper()
+
+	_, err := pool.Exec(context.Background(),
+		`INSERT INTO api_clients (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`,
+		id, "integration-client")
+	require.NoError(t, err)
+}
+
 func newHTTPPipeline(t *testing.T, provider *vision.Fake, syncWait time.Duration) *httpPipeline {
 	t.Helper()
 
@@ -152,6 +162,11 @@ func newHTTPPipeline(t *testing.T, provider *vision.Fake, syncWait time.Duration
 	logger := slog.New(slog.DiscardHandler)
 	objects := &storage.Fake{BucketExists: true, Objects: map[string][]byte{}}
 	store := scan.NewStore(pool)
+
+	// The test key authenticates as client 1, so scans it creates reference a
+	// real api_clients row. Seeding it keeps the foreign key honest instead of
+	// relaxing it for tests.
+	seedAPIClient(t, pool, 1)
 
 	workerService, err := scan.NewService(scan.ServiceOptions{
 		Store: store, Objects: objects, Provider: provider, Logger: logger,
@@ -183,7 +198,7 @@ func newHTTPPipeline(t *testing.T, provider *vision.Fake, syncWait time.Duration
 		MaxImageBytes: 10 << 20, MaxRequestBytes: 45 << 20, SyncWait: syncWait,
 	})
 	router := chi.NewRouter()
-	router.Use(auth.APIKey(testAPIKey))
+	router.Use(auth.APIKey(&testAPIKeyStore{key: testAPIKey}))
 	router.Post("/v1/scans", impl.Create)
 	router.Get("/v1/scans/{id}", impl.Get)
 

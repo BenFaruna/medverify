@@ -96,10 +96,10 @@ func TestProcessCompletesWithFakeProvider(t *testing.T) {
 	assert.Equal(t, "fake", extracted.Provider)
 	assert.Equal(t, "fake", extracted.PromptVersion)
 
-	view := finished.View()
+	view := finished.View(testReasonCatalog(t))
 	assert.Equal(t, scan.StatusCompleted, view.Status)
 	assert.Nil(t, view.Verdict)
-	assert.JSONEq(t, "[]", string(view.Reasons))
+	assert.Empty(t, view.Reasons)
 	assert.JSONEq(t, "[]", string(view.Flags), "no flags is an empty list, not null")
 	assert.NotNil(t, view.Extracted)
 }
@@ -134,7 +134,7 @@ func TestProcessStoresRegistryVerification(t *testing.T) {
 	assert.Equal(t, verify.ConfigVersion, features.Dataset.ConfigVersion)
 
 	// The API view exposes the same explainable result.
-	view := finished.View()
+	view := finished.View(testReasonCatalog(t))
 	require.NotNil(t, view.Features)
 	assert.Contains(t, string(view.Features), "candidate_only")
 	assert.Equal(t, 1, pipeline.matcher.(*fakeMatcher).calls)
@@ -194,7 +194,7 @@ func TestProcessStoresSourcedSafetyFlags(t *testing.T) {
 	assert.Equal(t, "https://example.test/nafdac/alerts/2026-09-01", finished.Flags[0].Source.URL)
 	assert.Equal(t, "2026-09-01", finished.Flags[0].Evidence["issued_at"])
 
-	view := finished.View()
+	view := finished.View(testReasonCatalog(t))
 	var flagsView []map[string]any
 	require.NoError(t, json.Unmarshal(view.Flags, &flagsView))
 	require.Len(t, flagsView, 1)
@@ -674,3 +674,11 @@ func (r *recordingRecorder) calls() []vision.CallRecord {
 }
 
 func ptrTest(value string) *string { return &value }
+
+// testReasonCatalog loads the reviewed English wording used by the API view.
+func testReasonCatalog(t *testing.T) *verdict.Catalog {
+	t.Helper()
+	catalog, err := verdict.LoadCatalog("")
+	require.NoError(t, err)
+	return &catalog
+}

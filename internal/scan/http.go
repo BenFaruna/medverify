@@ -18,6 +18,7 @@ import (
 
 	"github.com/benfaruna/medverify/internal/platform/auth"
 	"github.com/benfaruna/medverify/internal/platform/httpx"
+	"github.com/benfaruna/medverify/internal/verdict"
 )
 
 // HeaderIdempotencyKey makes a POST /v1/scans retry-safe.
@@ -37,9 +38,11 @@ type HTTPHandler struct {
 	maxImageBytes   int64
 	maxRequestBytes int64
 	syncWait        time.Duration
+	reasons         *verdict.Catalog
 }
 
-// HTTPOptions configures the scan endpoints.
+// HTTPOptions configures the scan endpoints. ReasonCatalog supplies the
+// reviewed wording for reason codes; nil keeps the embedded English catalog.
 type HTTPOptions struct {
 	Service         *Service
 	Logger          *slog.Logger
@@ -47,6 +50,7 @@ type HTTPOptions struct {
 	MaxImageBytes   int64
 	MaxRequestBytes int64
 	SyncWait        time.Duration
+	ReasonCatalog   *verdict.Catalog
 }
 
 // NewHTTPHandler builds the scan endpoints.
@@ -55,6 +59,18 @@ func NewHTTPHandler(opts HTTPOptions) *HTTPHandler {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
+	catalog := opts.ReasonCatalog
+	if catalog == nil {
+		loaded, err := verdict.LoadCatalog("")
+		if err != nil {
+			// The embedded catalog is compiled in and covered by tests, so this
+			// is unreachable in a working build. Log it and ship codes without
+			// sentences rather than failing every scan request.
+			logger.Error("scan reason catalog unavailable", slog.Any("err", err))
+		} else {
+			catalog = &loaded
+		}
+	}
 	return &HTTPHandler{
 		service:         opts.Service,
 		logger:          logger,
@@ -62,6 +78,7 @@ func NewHTTPHandler(opts HTTPOptions) *HTTPHandler {
 		maxImageBytes:   opts.MaxImageBytes,
 		maxRequestBytes: opts.MaxRequestBytes,
 		syncWait:        opts.SyncWait,
+		reasons:         catalog,
 	}
 }
 
@@ -132,7 +149,7 @@ func (h *HTTPHandler) Create(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusCreated
 	}
 	w.Header().Set("Location", "/v1/scans/"+scan.ID.String())
-	writeJSON(w, status, final.View())
+	writeJSON(w, status, final.View(h.reasons))
 
 	h.logger.InfoContext(r.Context(), "scan uploaded",
 		slog.String("scan_id", scan.ID.String()),
@@ -144,13 +161,19 @@ func (h *HTTPHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 // Get handles GET /v1/scans/{id}.
 func (h *HTTPHandler) Get(w http.ResponseWriter, r *http.Request) {
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	if !ok {
+		httpx.WriteProblem(w, r, httpx.NewProblem(http.StatusUnauthorized, httpx.CodeUnauthorized, "A valid X-API-Key header is required."))
+		return
+	}
+
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		httpx.WriteProblem(w, r, httpx.NewProblem(http.StatusBadRequest, httpx.CodeBadRequest, "The scan ID is not a valid UUID."))
 		return
 	}
 
-	scan, err := h.service.Get(r.Context(), id)
+	scan, err := h.service.GetForTenant(r.Context(), id, principal.TenantKey())
 	if errors.Is(err, ErrScanNotFound) {
 		httpx.WriteProblem(w, r, httpx.NewProblem(http.StatusNotFound, httpx.CodeNotFound, "No scan exists with this ID."))
 		return
@@ -159,7 +182,7 @@ func (h *HTTPHandler) Get(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, scan.View())
+	writeJSON(w, http.StatusOK, scan.View(h.reasons))
 }
 
 // optionalClientID returns the database client id for per-client scans. The

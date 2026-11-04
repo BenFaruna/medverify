@@ -104,6 +104,38 @@ func LoadCatalog(path string) (Catalog, error) {
 	return catalog, nil
 }
 
+// Rendered is one reason with reviewed, displayable text. Code stays available
+// so a client can act on a category, but clients must never show Code as-is.
+type Rendered struct {
+	Code   string            `json:"code"`
+	Text   string            `json:"text"`
+	Field  string            `json:"field,omitempty"`
+	Params map[string]string `json:"params,omitempty"`
+}
+
+// RenderAll renders reasons for display in the catalog's priority order. A
+// reason whose template needs a parameter the evaluator did not supply is
+// dropped: a sentence with a hole in it is worse than no sentence.
+func (c Catalog) RenderAll(reasons []Reason) []Rendered {
+	ordered := make([]Reason, len(reasons))
+	copy(ordered, reasons)
+	sortReasons(ordered)
+
+	rendered := make([]Rendered, 0, len(ordered))
+	for _, reason := range ordered {
+		text, err := c.Render(reason)
+		if err != nil {
+			continue
+		}
+		item := Rendered{Code: reason.Code, Text: text, Field: reason.Field}
+		if len(reason.Params) > 0 {
+			item.Params = reason.Params
+		}
+		rendered = append(rendered, item)
+	}
+	return rendered
+}
+
 // Render fills a template from reason parameters. A missing value is an error:
 // it is better to show no sentence than one with a hole in it.
 func (c Catalog) Render(reason Reason) (string, error) {
