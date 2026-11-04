@@ -381,10 +381,11 @@ func (s *Service) loadScan(ctx context.Context, id uuid.UUID, clientKey string) 
 	if err != nil {
 		return scan.Scan{}, err
 	}
-	// The phase 03 API key is shared. Comparing the stored client key keeps a
-	// conversation from being read through a different client until phase 11
-	// adds real per-client isolation.
-	if clientKey != "" && scanned.ClientKey != "" && scanned.ClientKey != clientKey {
+	// Tenant isolation: a scan is only visible to the client that created it.
+	// scans.client_key is NOT NULL and always holds the owning tenant key, so a
+	// mismatch is treated as "not found" rather than revealing that the scan
+	// exists under another client.
+	if scanned.ClientKey != clientKey {
 		return scan.Scan{}, scan.ErrScanNotFound
 	}
 	return scanned, nil

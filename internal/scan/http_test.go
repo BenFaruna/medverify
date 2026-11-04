@@ -101,7 +101,7 @@ func newTestScanHandler(t *testing.T, opts *scan.HTTPOptions) http.Handler {
 
 	opts.Service = nil // these tests stop before the service is called
 	handler := scan.NewHTTPHandler(*opts)
-	return auth.APIKey(testAPIKey)(http.HandlerFunc(handler.Create))
+	return auth.APIKey(&testAPIKeyStore{key: testAPIKey})(http.HandlerFunc(handler.Create))
 }
 
 func multipartRequest(body *bytes.Buffer, contentType string) *http.Request {

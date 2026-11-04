@@ -13,11 +13,27 @@ import (
 )
 
 type ApiClient struct {
-	ID        int64     `json:"id"`
-	Name      string    `json:"name"`
-	KeyHash   string    `json:"key_hash"`
-	Active    bool      `json:"active"`
-	CreatedAt time.Time `json:"created_at"`
+	ID                int64     `json:"id"`
+	Name              string    `json:"name"`
+	Active            bool      `json:"active"`
+	CreatedAt         time.Time `json:"created_at"`
+	Sandbox           bool      `json:"sandbox"`
+	RatePerMin        int32     `json:"rate_per_min"`
+	DailyRequestQuota int32     `json:"daily_request_quota"`
+	DailyScanQuota    int32     `json:"daily_scan_quota"`
+}
+
+type ApiKey struct {
+	ID         int64      `json:"id"`
+	ClientID   int64      `json:"client_id"`
+	KeyPrefix  string     `json:"key_prefix"`
+	KeyHash    string     `json:"key_hash"`
+	Scopes     []string   `json:"scopes"`
+	Active     bool       `json:"active"`
+	ExpiresAt  *time.Time `json:"expires_at"`
+	RevokedAt  *time.Time `json:"revoked_at"`
+	LastUsedAt *time.Time `json:"last_used_at"`
+	CreatedAt  time.Time  `json:"created_at"`
 }
 
 type AssistantToolCall struct {
@@ -133,14 +149,15 @@ type SafetyFlag struct {
 }
 
 type Scan struct {
-	ID           uuid.UUID  `json:"id"`
-	ClientKey    string     `json:"client_key"`
-	Status       string     `json:"status"`
-	Language     *string    `json:"language"`
-	LocationCell *string    `json:"location_cell"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
-	CompletedAt  *time.Time `json:"completed_at"`
+	ID           uuid.UUID   `json:"id"`
+	ClientKey    string      `json:"client_key"`
+	Status       string      `json:"status"`
+	Language     *string     `json:"language"`
+	LocationCell *string     `json:"location_cell"`
+	CreatedAt    time.Time   `json:"created_at"`
+	UpdatedAt    time.Time   `json:"updated_at"`
+	CompletedAt  *time.Time  `json:"completed_at"`
+	ApiClientID  pgtype.Int8 `json:"api_client_id"`
 }
 
 type ScanImage struct {
@@ -225,6 +242,15 @@ type SyncRun struct {
 	Error       *string    `json:"error"`
 }
 
+type UsageCounter struct {
+	ClientID  int64          `json:"client_id"`
+	Day       time.Time      `json:"day"`
+	Requests  int32          `json:"requests"`
+	Scans     int32          `json:"scans"`
+	Questions int32          `json:"questions"`
+	CostUsd   pgtype.Numeric `json:"cost_usd"`
+}
+
 type WatchlistEntry struct {
 	ID               int64      `json:"id"`
 	SourceID         int64      `json:"source_id"`
@@ -250,4 +276,30 @@ type WatchlistSource struct {
 	SourceUrl   string    `json:"source_url"`
 	IssuedAt    time.Time `json:"issued_at"`
 	CreatedAt   time.Time `json:"created_at"`
+}
+
+type WebhookDelivery struct {
+	ID             uuid.UUID  `json:"id"`
+	EndpointID     int64      `json:"endpoint_id"`
+	ClientID       int64      `json:"client_id"`
+	ScanID         uuid.UUID  `json:"scan_id"`
+	EventType      string     `json:"event_type"`
+	Payload        []byte     `json:"payload"`
+	Status         string     `json:"status"`
+	Attempts       int32      `json:"attempts"`
+	NextAttemptAt  time.Time  `json:"next_attempt_at"`
+	LastStatusCode *int32     `json:"last_status_code"`
+	LastError      *string    `json:"last_error"`
+	CreatedAt      time.Time  `json:"created_at"`
+	DeliveredAt    *time.Time `json:"delivered_at"`
+	DeadAt         *time.Time `json:"dead_at"`
+}
+
+type WebhookEndpoint struct {
+	ID        int64     `json:"id"`
+	ClientID  int64     `json:"client_id"`
+	Url       string    `json:"url"`
+	Secret    string    `json:"secret"`
+	Active    bool      `json:"active"`
+	CreatedAt time.Time `json:"created_at"`
 }

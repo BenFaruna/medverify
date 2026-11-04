@@ -22,11 +22,17 @@ type Querier interface {
 	CountRAGChunksByModel(ctx context.Context, embeddingModel string) (int64, error)
 	CountSMPCDocumentsByStatus(ctx context.Context) ([]CountSMPCDocumentsByStatusRow, error)
 	CountSMPCSections(ctx context.Context) (int64, error)
+	// Queries for the integrator API platform (phase 11). Keys are looked up by
+	// public prefix; the full key is never stored or logged.
+	CreateAPIClient(ctx context.Context, arg CreateAPIClientParams) (ApiClient, error)
+	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (ApiKey, error)
 	CreateConversation(ctx context.Context, arg CreateConversationParams) (Conversation, error)
 	// Queries for the scan pipeline (phase 03). Hand-written SQL only; sqlc
 	// compiles it.
 	CreateScan(ctx context.Context, arg CreateScanParams) (Scan, error)
+	CreateWebhookEndpoint(ctx context.Context, arg CreateWebhookEndpointParams) (WebhookEndpoint, error)
 	DeactivateWatchlistEntry(ctx context.Context, id int64) (int64, error)
+	DeadLetterWebhookDelivery(ctx context.Context, arg DeadLetterWebhookDeliveryParams) error
 	DeleteExpiredConversations(ctx context.Context) (int64, error)
 	DeleteProductIngredients(ctx context.Context, productID int64) error
 	DeleteRAGChunksForDocumentModel(ctx context.Context, arg DeleteRAGChunksForDocumentModelParams) error
@@ -35,9 +41,12 @@ type Querier interface {
 	// atomically with each terminal scan result, so a retry never leaves stale
 	// rows behind.
 	DeleteSafetyFlagsForScan(ctx context.Context, scanID uuid.UUID) error
+	EnsureUsageRow(ctx context.Context, arg EnsureUsageRowParams) error
 	// A terminal write only applies to a row this worker claimed.
 	FinishScan(ctx context.Context, arg FinishScanParams) (int64, error)
 	FinishSyncRun(ctx context.Context, arg FinishSyncRunParams) error
+	GetAPIClientByName(ctx context.Context, name string) (ApiClient, error)
+	GetAPIKeyByPrefix(ctx context.Context, keyPrefix string) (GetAPIKeyByPrefixRow, error)
 	// Queries for the grounded assistant (phase 09). All reads are scoped by the
 	// conversation's scan; there is no query that accepts a product or NRN from a
 	// caller in place of a scan.
@@ -48,6 +57,8 @@ type Querier interface {
 	GetSMPCDocument(ctx context.Context, arg GetSMPCDocumentParams) (SmpcDocument, error)
 	GetScan(ctx context.Context, id uuid.UUID) (Scan, error)
 	GetScanResult(ctx context.Context, scanID uuid.UUID) (ScanResult, error)
+	GetUsageForUpdate(ctx context.Context, arg GetUsageForUpdateParams) (UsageCounter, error)
+	IncrementUsage(ctx context.Context, arg IncrementUsageParams) error
 	InsertAssistantToolCall(ctx context.Context, arg InsertAssistantToolCallParams) error
 	// The primary key makes the race safe: one concurrent request wins and the
 	// other receives no row, then reads the winner.
@@ -63,12 +74,16 @@ type Querier interface {
 	InsertScanImage(ctx context.Context, arg InsertScanImageParams) (ScanImage, error)
 	// A repeated import of the same reviewed file inserts nothing new.
 	InsertWatchlistEntry(ctx context.Context, arg InsertWatchlistEntryParams) (int64, error)
+	InsertWebhookDelivery(ctx context.Context, arg InsertWebhookDeliveryParams) (WebhookDelivery, error)
 	LastSuccessfulSyncRun(ctx context.Context) (SyncRun, error)
 	LatestSyncRun(ctx context.Context) (SyncRun, error)
+	ListAPIKeys(ctx context.Context) ([]ListAPIKeysRow, error)
+	ListAllWebhookEndpoints(ctx context.Context) ([]WebhookEndpoint, error)
 	// Documents that are readable and have not yet been indexed for this model and
 	// this exact file hash. Completed documents drop out, so a crashed backfill
 	// resumes without re-embedding everything.
 	ListDocumentsForRAGIndex(ctx context.Context, arg ListDocumentsForRAGIndexParams) ([]ListDocumentsForRAGIndexRow, error)
+	ListDueWebhookDeliveries(ctx context.Context, rowLimit int32) ([]ListDueWebhookDeliveriesRow, error)
 	ListIngredientNameCounts(ctx context.Context, rowLimit int32) ([]ListIngredientNameCountsRow, error)
 	ListLiveWatchlistEntriesByIngredients(ctx context.Context, arg ListLiveWatchlistEntriesByIngredientsParams) ([]ListLiveWatchlistEntriesByIngredientsRow, error)
 	ListLiveWatchlistEntriesByNRN(ctx context.Context, arg ListLiveWatchlistEntriesByNRNParams) ([]ListLiveWatchlistEntriesByNRNRow, error)
@@ -89,13 +104,18 @@ type Querier interface {
 	ListScoredScanResults(ctx context.Context, rowLimit int32) ([]ListScoredScanResultsRow, error)
 	ListStaleWatchlistEntries(ctx context.Context, today *time.Time) ([]ListStaleWatchlistEntriesRow, error)
 	ListWatchlistEntries(ctx context.Context) ([]ListWatchlistEntriesRow, error)
+	ListWebhookEndpoints(ctx context.Context, clientID int64) ([]WebhookEndpoint, error)
+	MarkWebhookDelivered(ctx context.Context, arg MarkWebhookDeliveredParams) error
 	// Used by readiness probes and by smoke tests. It keeps the sqlc pipeline
 	// exercised until phase 02 adds real tables and queries.
 	Ping(ctx context.Context) (int64, error)
 	RAGCoverage(ctx context.Context, embeddingModel string) (RAGCoverageRow, error)
+	ReplayWebhookDelivery(ctx context.Context, id uuid.UUID) (int64, error)
 	// River retries a failed job. Moving failed back to queued is the only
 	// transition that lets the retry claim the scan again.
 	RequeueFailedScan(ctx context.Context, id uuid.UUID) (int64, error)
+	RetryWebhookDelivery(ctx context.Context, arg RetryWebhookDeliveryParams) error
+	RevokeAPIKey(ctx context.Context, keyPrefix string) (int64, error)
 	// Nearest-neighbour search: the inner query uses the GiST trigram index and
 	// stops after @row_limit names, so a large watchlist is never scored in full.
 	// The similarity threshold is applied to those candidates, which can return
@@ -108,6 +128,7 @@ type Querier interface {
 	SearchRAGChunksByText(ctx context.Context, arg SearchRAGChunksByTextParams) ([]SearchRAGChunksByTextRow, error)
 	SearchRAGChunksByVector(ctx context.Context, arg SearchRAGChunksByVectorParams) ([]SearchRAGChunksByVectorRow, error)
 	StartSyncRun(ctx context.Context, startedAt time.Time) (SyncRun, error)
+	TouchAPIKey(ctx context.Context, id int64) error
 	TouchConversation(ctx context.Context, id uuid.UUID) error
 	// Queries for the Greenbook registry. Hand-written SQL only; sqlc compiles it.
 	// Insert or update a product when its payload hash changed. The xmax trick

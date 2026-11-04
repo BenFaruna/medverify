@@ -100,7 +100,8 @@ func (h *HTTPHandler) Create(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	scan, created, err := h.service.Create(createCtx, CreateRequest{
-		ClientKey:      principal.Key,
+		ClientKey:      principal.TenantKey(),
+		APIClientID:    optionalClientID(principal),
 		IdempotencyKey: upload.idempotencyKey,
 		RequestHash:    requestHash,
 		Language:       upload.language,
@@ -159,6 +160,17 @@ func (h *HTTPHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, scan.View())
+}
+
+// optionalClientID returns the database client id for per-client scans. The
+// legacy single-key mode has no row, so the scan keeps a NULL client id and is
+// scoped by its tenant key instead.
+func optionalClientID(principal auth.Principal) *int64 {
+	if principal.ClientID == 0 {
+		return nil
+	}
+	id := principal.ClientID
+	return &id
 }
 
 type upload struct {

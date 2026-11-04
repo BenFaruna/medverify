@@ -19,7 +19,7 @@ import (
 
 func testRouter(handler *HTTPHandler) http.Handler {
 	router := chi.NewRouter()
-	router.Use(auth.APIKey("test-key"))
+	router.Use(auth.APIKey(&testAPIKeyStore{key: testAPIKey}))
 	router.Post("/v1/scans/{id}/questions", handler.Ask)
 	router.Get("/v1/scans/{id}/conversation", handler.Conversation)
 	return router
@@ -43,7 +43,7 @@ func TestAskEndpointRejectsMalformedBodies(t *testing.T) {
 	handler := testRouter(NewHTTPHandler(HTTPOptions{Service: service}))
 	for _, body := range []string{`{}`, `{"question":""}`, `not json`, `{"question":"hi","extra":true}`} {
 		request := httptest.NewRequest(http.MethodPost, "/v1/scans/"+scans.scanned.ID.String()+"/questions", strings.NewReader(body))
-		request.Header.Set(auth.HeaderAPIKey, "test-key")
+		request.Header.Set(auth.HeaderAPIKey, testAPIKey)
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
 		if response.Code != http.StatusBadRequest {
@@ -54,14 +54,14 @@ func TestAskEndpointRejectsMalformedBodies(t *testing.T) {
 
 func TestAskEndpointReturnsAForbiddenAnswer(t *testing.T) {
 	scans := &fakeScans{scanned: scannedFixture()}
-	scans.scanned.ClientKey = auth.DefaultClientKey
+	scans.scanned.ClientKey = testTenantKey
 	client := llm.NewFake(routeResponse("personal_safety"))
 	service := newTestService(t, client, &fakeTranscriptStore{}, scans, &fakeSearcher{})
 	handler := testRouter(NewHTTPHandler(HTTPOptions{Service: service}))
 
 	request := httptest.NewRequest(http.MethodPost, "/v1/scans/"+scans.scanned.ID.String()+"/questions",
 		strings.NewReader(`{"question":"Is this okay for my child?"}`))
-	request.Header.Set(auth.HeaderAPIKey, "test-key")
+	request.Header.Set(auth.HeaderAPIKey, testAPIKey)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -81,12 +81,12 @@ func TestAskEndpointReturnsAForbiddenAnswer(t *testing.T) {
 
 func TestAskEndpointReturnsRetryableProviderFailure(t *testing.T) {
 	scans := &fakeScans{scanned: scannedFixture()}
-	scans.scanned.ClientKey = auth.DefaultClientKey
+	scans.scanned.ClientKey = testTenantKey
 	service := newTestService(t, llm.NewFake(llm.FakeResponse{Err: context.DeadlineExceeded}), &fakeTranscriptStore{}, scans, &fakeSearcher{})
 	handler := testRouter(NewHTTPHandler(HTTPOptions{Service: service}))
 	request := httptest.NewRequest(http.MethodPost, "/v1/scans/"+scans.scanned.ID.String()+"/questions",
 		strings.NewReader(`{"question":"anything"}`))
-	request.Header.Set(auth.HeaderAPIKey, "test-key")
+	request.Header.Set(auth.HeaderAPIKey, testAPIKey)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusServiceUnavailable {
@@ -99,7 +99,7 @@ func TestAskEndpointReturnsRetryableProviderFailure(t *testing.T) {
 
 func TestConversationEndpointReturnsTranscript(t *testing.T) {
 	scans := &fakeScans{scanned: scannedFixture()}
-	scans.scanned.ClientKey = auth.DefaultClientKey
+	scans.scanned.ClientKey = testTenantKey
 	store := &fakeTranscriptStore{exists: true, conversation: Conversation{
 		ID: uuid.New(), ScanID: scans.scanned.ID, Language: "en",
 		ExpiresAt: time.Now().Add(time.Hour),
@@ -107,7 +107,7 @@ func TestConversationEndpointReturnsTranscript(t *testing.T) {
 	service := newTestService(t, llm.NewFake(), store, scans, &fakeSearcher{})
 	handler := testRouter(NewHTTPHandler(HTTPOptions{Service: service}))
 	request := httptest.NewRequest(http.MethodGet, "/v1/scans/"+scans.scanned.ID.String()+"/conversation", nil)
-	request.Header.Set(auth.HeaderAPIKey, "test-key")
+	request.Header.Set(auth.HeaderAPIKey, testAPIKey)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {

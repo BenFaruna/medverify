@@ -30,9 +30,12 @@ type Options struct {
 	ReadyTimeout   time.Duration
 	RequestTimeout time.Duration
 	MaxBodyBytes   int64
-	APIKey         string
-	Scan           *scan.HTTPHandler
-	Assistant      *assistant.HTTPHandler
+	// Auth is the database-backed key store. When it is nil and APIKey is set,
+	// the legacy single-key mode is used; that mode is development only.
+	Auth      auth.Store
+	APIKey    string
+	Scan      *scan.HTTPHandler
+	Assistant *assistant.HTTPHandler
 }
 
 // NewHandler builds the router: middleware, health endpoints, and the problem
@@ -66,13 +69,21 @@ func NewHandler(opts Options) http.Handler {
 	router.Get("/readyz", readyz(logger, opts.Dependencies, opts.ReadyTimeout))
 
 	if opts.Scan != nil {
+		store := opts.Auth
+		if store == nil && opts.APIKey != "" {
+			store = auth.NewSingleKeyStore(auth.SingleKeyOptions{Key: opts.APIKey})
+		}
+
 		router.Route("/v1", func(r chi.Router) {
-			r.Use(auth.APIKey(opts.APIKey))
-			r.Post("/scans", opts.Scan.Create)
-			r.Get("/scans/{id}", opts.Scan.Get)
+			// A nil store means no key can authenticate: every route below fails
+			// closed with 401 rather than serving unauthenticated traffic.
+			r.Use(auth.APIKey(store))
+
+			r.With(auth.RequireScope(auth.ScopeScansWrite)).Post("/scans", opts.Scan.Create)
+			r.With(auth.RequireScope(auth.ScopeScansRead)).Get("/scans/{id}", opts.Scan.Get)
 			if opts.Assistant != nil {
-				r.Post("/scans/{id}/questions", opts.Assistant.Ask)
-				r.Get("/scans/{id}/conversation", opts.Assistant.Conversation)
+				r.With(auth.RequireScope(auth.ScopeQuestionsWrite)).Post("/scans/{id}/questions", opts.Assistant.Ask)
+				r.With(auth.RequireScope(auth.ScopeScansRead)).Get("/scans/{id}/conversation", opts.Assistant.Conversation)
 			}
 		})
 	}

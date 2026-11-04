@@ -45,6 +45,7 @@ func NewStore(pool *pgxpool.Pool) *Store {
 type CreateInput struct {
 	ID             uuid.UUID
 	ClientKey      string
+	APIClientID    *int64
 	IdempotencyKey string
 	RequestHash    string
 	Language       string
@@ -66,6 +67,7 @@ func (s *Store) CreateScan(ctx context.Context, input CreateInput) (Scan, bool, 
 	row, err := q.CreateScan(ctx, dbgen.CreateScanParams{
 		ID:           input.ID,
 		ClientKey:    input.ClientKey,
+		ApiClientID:  optionalInt8(input.APIClientID),
 		Language:     optional(input.Language),
 		LocationCell: optional(input.LocationCell),
 	})
@@ -417,6 +419,14 @@ func valueOrEmpty(value *string) string {
 		return ""
 	}
 	return *value
+}
+
+// optionalInt8 maps an optional database id onto the nullable column type.
+func optionalInt8(value *int64) pgtype.Int8 {
+	if value == nil {
+		return pgtype.Int8{}
+	}
+	return pgtype.Int8{Int64: *value, Valid: true}
 }
 
 func optional(value string) *string {

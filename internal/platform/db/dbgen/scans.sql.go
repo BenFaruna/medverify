@@ -31,16 +31,17 @@ func (q *Queries) ClaimScan(ctx context.Context, id uuid.UUID) (int64, error) {
 
 const createScan = `-- name: CreateScan :one
 
-INSERT INTO scans (id, client_key, language, location_cell)
-VALUES ($1, $2, $3, $4)
-RETURNING id, client_key, status, language, location_cell, created_at, updated_at, completed_at
+INSERT INTO scans (id, client_key, api_client_id, language, location_cell)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, client_key, status, language, location_cell, created_at, updated_at, completed_at, api_client_id
 `
 
 type CreateScanParams struct {
-	ID           uuid.UUID `json:"id"`
-	ClientKey    string    `json:"client_key"`
-	Language     *string   `json:"language"`
-	LocationCell *string   `json:"location_cell"`
+	ID           uuid.UUID   `json:"id"`
+	ClientKey    string      `json:"client_key"`
+	ApiClientID  pgtype.Int8 `json:"api_client_id"`
+	Language     *string     `json:"language"`
+	LocationCell *string     `json:"location_cell"`
 }
 
 // Queries for the scan pipeline (phase 03). Hand-written SQL only; sqlc
@@ -49,6 +50,7 @@ func (q *Queries) CreateScan(ctx context.Context, arg CreateScanParams) (Scan, e
 	row := q.db.QueryRow(ctx, createScan,
 		arg.ID,
 		arg.ClientKey,
+		arg.ApiClientID,
 		arg.Language,
 		arg.LocationCell,
 	)
@@ -62,6 +64,7 @@ func (q *Queries) CreateScan(ctx context.Context, arg CreateScanParams) (Scan, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CompletedAt,
+		&i.ApiClientID,
 	)
 	return i, err
 }
@@ -113,7 +116,7 @@ func (q *Queries) GetIdempotencyKey(ctx context.Context, arg GetIdempotencyKeyPa
 }
 
 const getScan = `-- name: GetScan :one
-SELECT id, client_key, status, language, location_cell, created_at, updated_at, completed_at FROM scans WHERE id = $1
+SELECT id, client_key, status, language, location_cell, created_at, updated_at, completed_at, api_client_id FROM scans WHERE id = $1
 `
 
 func (q *Queries) GetScan(ctx context.Context, id uuid.UUID) (Scan, error) {
@@ -128,6 +131,7 @@ func (q *Queries) GetScan(ctx context.Context, id uuid.UUID) (Scan, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CompletedAt,
+		&i.ApiClientID,
 	)
 	return i, err
 }

@@ -76,7 +76,7 @@ func (h *HTTPHandler) Ask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	answer, err := h.service.Ask(r.Context(), AskRequest{
-		ScanID: scanID, ClientKey: principal.Key, Question: body.Question,
+		ScanID: scanID, ClientKey: principal.TenantKey(), Question: body.Question,
 	})
 	if err != nil {
 		h.writeError(w, r, err)
@@ -96,7 +96,7 @@ func (h *HTTPHandler) Conversation(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteProblem(w, r, httpx.NewProblem(http.StatusUnauthorized, httpx.CodeUnauthorized, "A valid X-API-Key header is required."))
 		return
 	}
-	view, err := h.service.Conversation(r.Context(), scanID, principal.Key)
+	view, err := h.service.Conversation(r.Context(), scanID, principal.TenantKey())
 	if err != nil {
 		h.writeError(w, r, err)
 		return

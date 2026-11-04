@@ -128,9 +128,11 @@ func NewService(opts ServiceOptions) (*Service, error) {
 	}, nil
 }
 
-// CreateRequest is one validated upload request.
+// CreateRequest is one validated upload request. ClientKey is the non-secret
+// tenant key; APIClientID is the owning api_clients row when one exists.
 type CreateRequest struct {
 	ClientKey      string
+	APIClientID    *int64
 	IdempotencyKey string
 	RequestHash    string
 	Language       string
@@ -196,6 +198,7 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (Scan, bool
 	scan, created, err := s.store.CreateScan(ctx, CreateInput{
 		ID:             scanID,
 		ClientKey:      request.ClientKey,
+		APIClientID:    request.APIClientID,
 		IdempotencyKey: request.IdempotencyKey,
 		RequestHash:    request.RequestHash,
 		Language:       request.Language,
