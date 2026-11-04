@@ -13,6 +13,7 @@ import (
 	"github.com/benfaruna/medverify/internal/assistant"
 	"github.com/benfaruna/medverify/internal/platform/auth"
 	"github.com/benfaruna/medverify/internal/platform/httpx"
+	"github.com/benfaruna/medverify/internal/platform/metrics"
 	"github.com/benfaruna/medverify/internal/platform/ratelimit"
 	"github.com/benfaruna/medverify/internal/scan"
 )
@@ -52,6 +53,14 @@ type Options struct {
 	APIKey    string
 	Scan      *scan.HTTPHandler
 	Assistant *assistant.HTTPHandler
+	// Metrics exposes /metrics when set. Only aggregate HTTP counters are
+	// recorded; paths are reduced to route patterns.
+	Metrics *metrics.Metrics
+	// Kill switches. The zero value keeps every feature enabled, so tests and
+	// local runs need no extra setup; production passes the parsed config.
+	DisableAPI       bool
+	DisableScans     bool
+	DisableAssistant bool
 }
 
 // NewHandler builds the router: middleware, health endpoints, and the problem
@@ -78,6 +87,10 @@ func NewHandler(opts Options) http.Handler {
 	router.Use(httpx.Timeout(opts.RequestTimeout))
 	router.Use(httpx.MaxBodyBytesExcept(opts.MaxBodyBytes, "/v1/scans"))
 	router.Use(httpx.CORS(opts.CORSOrigins))
+	if opts.Metrics != nil {
+		router.Use(observeRequests(opts.Metrics))
+		router.Method(http.MethodGet, "/metrics", opts.Metrics.Handler())
+	}
 
 	router.NotFound(httpx.NotFoundHandler().ServeHTTP)
 	router.MethodNotAllowed(httpx.MethodNotAllowedHandler().ServeHTTP)
@@ -98,6 +111,9 @@ func NewHandler(opts Options) http.Handler {
 		}
 
 		router.Route("/v1", func(r chi.Router) {
+			// Kill switches answer before any auth or database work, so a
+			// maintenance window does not spend capacity on rejected calls.
+			r.Use(featureGate(opts))
 			// Address-level limiting runs before authentication so an unknown
 			// caller cannot hammer the key lookup.
 			r.Use(auth.IPRateLimit(opts.Limiter, opts.IPRatePerMin, opts.RateLimitBurst))
@@ -138,6 +154,105 @@ func NewHandler(opts Options) http.Handler {
 	}
 
 	return router
+}
+
+// featureGate turns the configured kill switches into 503 problem responses.
+// It runs before authentication, so a disabled feature never touches a key or
+// the database. The switch matches the documented route, not a prefix: a typo
+// in an unrelated path can never be silently disabled.
+func featureGate(opts Options) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case opts.DisableAPI:
+				unavailable(w, r, "API")
+			case opts.DisableScans && r.Method == http.MethodPost && r.URL.Path == "/v1/scans":
+				unavailable(w, r, "scan submission")
+			case opts.DisableAssistant && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/questions"):
+				unavailable(w, r, "question assistant")
+			default:
+				next.ServeHTTP(w, r)
+			}
+		})
+	}
+}
+
+func unavailable(w http.ResponseWriter, r *http.Request, feature string) {
+	httpx.WriteProblem(w, r, httpx.NewProblem(
+		http.StatusServiceUnavailable,
+		httpx.CodeUnavailable,
+		"The "+feature+" is temporarily disabled.",
+	))
+}
+
+// observeRequests records one metric sample per request, labelled by the
+// router's pattern rather than the concrete path.
+type metricsRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *metricsRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
+}
+
+func (r *metricsRecorder) Write(b []byte) (int, error) {
+	if r.status == 0 {
+		r.WriteHeader(http.StatusOK)
+	}
+	return r.ResponseWriter.Write(b)
+}
+
+// Unwrap lets http.ResponseController reach the underlying writer.
+func (r *metricsRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
+
+func observeRequests(registry *metrics.Metrics) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			started := time.Now()
+			recorder := &metricsRecorder{ResponseWriter: w}
+
+			next.ServeHTTP(recorder, r)
+
+			status := recorder.status
+			if status == 0 {
+				status = http.StatusOK
+			}
+			registry.ObserveRequest(r.Method, routePattern(r), status, time.Since(started))
+		})
+	}
+}
+
+// routePattern returns the most specific matched pattern. A middleware that
+// answers early (401, 403, 429) stops before the leaf route is recorded, so a
+// small fixed map names the documented /v1 routes instead. It never returns a
+// concrete path, so a scan ID cannot become a metric label.
+func routePattern(r *http.Request) string {
+	if routeContext := chi.RouteContext(r.Context()); routeContext != nil {
+		pattern := routeContext.RoutePattern()
+		if pattern != "" && !strings.HasSuffix(pattern, "/*") {
+			return pattern
+		}
+	}
+
+	path := r.URL.Path
+	switch {
+	case path == "/v1/scans":
+		return "/v1/scans"
+	case path == "/metrics":
+		return "/metrics"
+	case strings.HasPrefix(path, "/v1/scans/") && strings.HasSuffix(path, "/questions"):
+		return "/v1/scans/{id}/questions"
+	case strings.HasPrefix(path, "/v1/scans/") && strings.HasSuffix(path, "/conversation"):
+		return "/v1/scans/{id}/conversation"
+	case strings.HasPrefix(path, "/v1/scans/"):
+		return "/v1/scans/{id}"
+	case strings.HasPrefix(path, "/v1/"):
+		return "/v1/*"
+	default:
+		return "unmatched"
+	}
 }
 
 // chain applies middlewares in order, so the first one runs first.

@@ -23,6 +23,7 @@ import (
 	"github.com/benfaruna/medverify/internal/platform/httpx"
 	"github.com/benfaruna/medverify/internal/platform/jobs"
 	"github.com/benfaruna/medverify/internal/platform/logging"
+	"github.com/benfaruna/medverify/internal/platform/metrics"
 	"github.com/benfaruna/medverify/internal/platform/ratelimit"
 	"github.com/benfaruna/medverify/internal/rag"
 	"github.com/benfaruna/medverify/internal/scan"
@@ -117,17 +118,21 @@ func run() error {
 			{Name: "database", Check: func(ctx context.Context) error { return db.Ping(ctx, pool) }},
 			{Name: "storage", Check: store.Ping},
 		},
-		ReadyTimeout:   cfg.HTTP.RequestTimeout,
-		RequestTimeout: cfg.HTTP.RequestTimeout,
-		MaxBodyBytes:   cfg.HTTP.MaxBodyBytes,
-		Auth:           buildKeyStore(cfg, pool, logger),
-		Usage:          auth.NewDBUsageStore(pool),
-		Limiter:        ratelimit.New(),
-		RatePerMin:     cfg.API.RatePerMin,
-		IPRatePerMin:   cfg.API.IPRatePerMin,
-		RateLimitBurst: cfg.API.RateLimitBurst,
-		CORSOrigins:    cfg.API.CORSOrigins,
-		APIKey:         cfg.API.LegacyKey,
+		ReadyTimeout:     cfg.HTTP.RequestTimeout,
+		RequestTimeout:   cfg.HTTP.RequestTimeout,
+		MaxBodyBytes:     cfg.HTTP.MaxBodyBytes,
+		Auth:             buildKeyStore(cfg, pool, logger),
+		Usage:            auth.NewDBUsageStore(pool),
+		Limiter:          ratelimit.New(),
+		RatePerMin:       cfg.API.RatePerMin,
+		IPRatePerMin:     cfg.API.IPRatePerMin,
+		RateLimitBurst:   cfg.API.RateLimitBurst,
+		CORSOrigins:      cfg.API.CORSOrigins,
+		APIKey:           cfg.API.LegacyKey,
+		Metrics:          metrics.New(),
+		DisableAPI:       !cfg.Features.API,
+		DisableScans:     !cfg.Features.Scans,
+		DisableAssistant: !cfg.Features.Assistant,
 		Scan: scan.NewHTTPHandler(scan.HTTPOptions{
 			Service:         scanService,
 			Logger:          logger,

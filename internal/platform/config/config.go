@@ -58,6 +58,19 @@ type Config struct {
 	Webhook    Webhook
 	Web        Web
 	Retention  Retention
+	Features   Features
+}
+
+// Features holds the phase 12 kill switches. They are read at startup, so
+// flipping one is a deploy, which is the tested rollback path.
+type Features struct {
+	// API disables the whole /v1 surface while leaving probes and the web
+	// client reachable. It is the "turn the service off" switch.
+	API bool
+	// Scans disables new scan submissions. Existing scans can still be read.
+	Scans bool
+	// Assistant disables the question endpoints; verdicts do not depend on it.
+	Assistant bool
 }
 
 // Web holds the static MVP client settings. An empty Dir disables serving it,
@@ -402,6 +415,11 @@ func LoadFrom(environ []string) (Config, error) {
 		},
 		Web: Web{
 			Dir: l.str("WEB_DIR", "web"),
+		},
+		Features: Features{
+			API:       l.boolean("FEATURE_API_ENABLED", true),
+			Scans:     l.boolean("FEATURE_SCANS_ENABLED", true),
+			Assistant: l.boolean("FEATURE_ASSISTANT_ENABLED", true),
 		},
 		Retention: Retention{
 			Enabled:          l.boolean("RETENTION_ENABLED", true),

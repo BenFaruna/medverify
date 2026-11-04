@@ -14,6 +14,7 @@ import (
 
 	"github.com/benfaruna/medverify/internal/platform/auth"
 	"github.com/benfaruna/medverify/internal/platform/httpx"
+	"github.com/benfaruna/medverify/internal/platform/metrics"
 	"github.com/benfaruna/medverify/internal/platform/ratelimit"
 	"github.com/benfaruna/medverify/internal/scan"
 	"github.com/google/uuid"
@@ -249,4 +250,76 @@ func TestReadinessResponseIsNotCached(t *testing.T) {
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 
 	assert.Equal(t, "no-store", recorder.Header().Get("Cache-Control"))
+}
+
+func TestFeatureSwitchesReturnUnavailableBeforeAuth(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(Options{
+		DisableScans: true,
+		Scan:         scan.NewHTTPHandler(scan.HTTPOptions{}),
+	})
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/scans", nil))
+
+	assert.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	var problem httpx.Problem
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &problem))
+	assert.Equal(t, httpx.CodeUnavailable, problem.Code)
+
+	// Reads are not part of the submission switch: a finished scan stays
+	// readable, so the check reaches auth and fails with 401.
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/scans/"+uuid.NewString(), nil))
+	assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+}
+
+func TestAPISwitchDisablesEveryVersionedRoute(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(Options{
+		DisableAPI: true,
+		APIKey:     "test-key",
+		Scan:       scan.NewHTTPHandler(scan.HTTPOptions{}),
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/scans/"+uuid.NewString(), nil)
+	request.Header.Set(auth.HeaderAPIKey, "test-key")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	assert.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+
+	// Probes stay available so an orchestrator does not restart the process.
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	assert.Equal(t, http.StatusOK, recorder.Code)
+}
+
+func TestMetricsUseRoutePatternsAndNeverScanIDs(t *testing.T) {
+	t.Parallel()
+
+	registry := metrics.New()
+	handler := NewHandler(Options{
+		APIKey:  "test-key",
+		Scan:    scan.NewHTTPHandler(scan.HTTPOptions{}),
+		Metrics: registry,
+	})
+
+	scanID := uuid.NewString()
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/scans/"+scanID, nil))
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
+
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Header().Get("Content-Type"), "text/plain")
+
+	body := recorder.Body.String()
+	assert.Contains(t, body, `route="/v1/scans/{id}"`)
+	assert.Contains(t, body, "medverify_http_requests_total")
+	assert.Contains(t, body, "medverify_http_request_duration_seconds_count")
+	assert.NotContains(t, body, scanID, "a scan ID must never become a metric label")
 }

@@ -379,3 +379,24 @@ func TestRetentionDefaultsAndValidation(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "RETENTION_FLAGGED_IMAGE_DAYS")
 }
+
+func TestFeatureSwitchesDefaultOnAndCanBeDisabled(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := config.LoadFrom(baseEnv())
+	require.NoError(t, err)
+	assert.True(t, cfg.Features.API)
+	assert.True(t, cfg.Features.Scans)
+	assert.True(t, cfg.Features.Assistant)
+
+	off := append(baseEnv(),
+		"FEATURE_API_ENABLED=false",
+		"FEATURE_SCANS_ENABLED=false",
+		"FEATURE_ASSISTANT_ENABLED=false",
+	)
+	cfg, err = config.LoadFrom(off)
+	require.NoError(t, err)
+	assert.False(t, cfg.Features.API)
+	assert.False(t, cfg.Features.Scans)
+	assert.False(t, cfg.Features.Assistant)
+}
