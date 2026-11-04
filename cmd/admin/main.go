@@ -57,6 +57,9 @@ commands:
   apikey list           list key prefixes with client, state, and usage dates
   apikey revoke <key|prefix>
                         revoke every active key matching the prefix
+  retention sweep       delete expired scan images and conversations now
+  scan delete <id> --confirm
+                        erase one scan, its images, and its conversation
   watchlist import <file.csv> [--dry-run]
                         validate and load reviewed watchlist entries
   watchlist list [--all] [--stale]
@@ -117,6 +120,10 @@ func run(args []string) error {
 		return registryCommand(ctx, cfg, args[1:])
 	case "apikey":
 		return apikeyCommand(ctx, cfg, args[1:])
+	case "retention":
+		return retentionCommand(ctx, cfg, args[1:])
+	case "scan":
+		return scanCommand(ctx, cfg, args[1:])
 	case "watchlist":
 		return watchlistCommand(ctx, cfg, args[1:])
 	case "verdict":

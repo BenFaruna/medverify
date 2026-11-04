@@ -21,6 +21,7 @@ import (
 	"github.com/benfaruna/medverify/internal/platform/logging"
 	"github.com/benfaruna/medverify/internal/rag"
 	"github.com/benfaruna/medverify/internal/registry"
+	"github.com/benfaruna/medverify/internal/retention"
 	"github.com/benfaruna/medverify/internal/safety"
 	"github.com/benfaruna/medverify/internal/scan"
 	"github.com/benfaruna/medverify/internal/storage"
@@ -40,6 +41,35 @@ func main() {
 // runWebhookDispatcher drains due webhook deliveries until the process stops.
 // One failed batch is logged and retried on the next tick rather than killing
 // the worker.
+func runRetentionSweeper(ctx context.Context, sweeper *retention.Sweeper, options retention.Options, interval time.Duration, logger *slog.Logger) {
+	if interval <= 0 {
+		return
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			passCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+			report, err := sweeper.Sweep(passCtx, options, time.Now())
+			cancel()
+			if err != nil {
+				logger.ErrorContext(ctx, "retention sweep failed",
+					slog.Int("images_deleted", report.ImagesDeleted),
+					slog.Int("failed_deletes", report.FailedDeletes),
+					slog.Any("err", err))
+				continue
+			}
+			logger.InfoContext(ctx, "retention sweep complete",
+				slog.Int("images_deleted", report.ImagesDeleted),
+				slog.Int("conversations_deleted", report.ConversationsDeleted))
+		}
+	}
+}
+
 func runWebhookDispatcher(ctx context.Context, dispatcher *webhook.Dispatcher, interval time.Duration, logger *slog.Logger) {
 	if interval <= 0 {
 		interval = 15 * time.Second
@@ -190,6 +220,18 @@ func run() error {
 		Logger: logger,
 	}
 	go runWebhookDispatcher(ctx, dispatcher, cfg.Webhook.Interval, logger)
+
+	// Retention is a scheduled sweep in the worker, not a job row: a missed
+	// pass only delays deletion, and the same code is available as an admin
+	// command for an operator to run by hand.
+	if cfg.Retention.Enabled && cfg.Retention.SweepInterval > 0 {
+		sweeper := retention.NewSweeper(retention.NewStore(pool), objects, logger)
+		go runRetentionSweeper(ctx, sweeper, retention.Options{
+			ImageRetention:        time.Duration(cfg.Retention.ImageDays) * 24 * time.Hour,
+			FlaggedImageRetention: time.Duration(cfg.Retention.FlaggedImageDays) * 24 * time.Hour,
+			BatchSize:             cfg.Retention.BatchSize,
+		}, cfg.Retention.SweepInterval, logger)
+	}
 
 	client, err := jobs.NewClient(pool, logger, jobs.NewWorkers(logger, workerOpts...), cfg.Jobs, clientOpts...)
 	if err != nil {

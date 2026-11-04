@@ -359,3 +359,23 @@ func TestUnknownProvidersAreRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "VISION_PROVIDER")
 	assert.Contains(t, err.Error(), "ASSISTANT_LLM_PROVIDER")
 }
+
+func TestRetentionDefaultsAndValidation(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := config.LoadFrom(baseEnv())
+	require.NoError(t, err)
+	assert.True(t, cfg.Retention.Enabled)
+	assert.Equal(t, 6*time.Hour, cfg.Retention.SweepInterval)
+	assert.Equal(t, 30, cfg.Retention.ImageDays)
+	assert.Equal(t, 365, cfg.Retention.FlaggedImageDays)
+	assert.Equal(t, 500, cfg.Retention.BatchSize)
+
+	bad := append(baseEnv(),
+		"RETENTION_IMAGE_DAYS=90",
+		"RETENTION_FLAGGED_IMAGE_DAYS=30",
+	)
+	_, err = config.LoadFrom(bad)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "RETENTION_FLAGGED_IMAGE_DAYS")
+}

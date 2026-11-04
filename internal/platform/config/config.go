@@ -57,6 +57,7 @@ type Config struct {
 	Assistant  Assistant
 	Webhook    Webhook
 	Web        Web
+	Retention  Retention
 }
 
 // Web holds the static MVP client settings. An empty Dir disables serving it,
@@ -73,6 +74,26 @@ type Webhook struct {
 	Interval time.Duration
 	// Timeout bounds a single delivery attempt.
 	Timeout time.Duration
+}
+
+// Retention holds the phase 12 data-retention policy. Images are personal data
+// and are deleted on schedule; the scan row, verdict, and flags stay so a
+// flagged case remains auditable. Questions expire through the conversation
+// TTL, so the sweep only has to remove the rows that expiry already marked.
+type Retention struct {
+	// Enabled is the sweep kill switch. Disabling it stops scheduled deletion
+	// without changing code; an operator must still run the sweep by hand.
+	Enabled bool
+	// SweepInterval is how often the worker runs a pass. Zero disables the
+	// scheduled pass but leaves the manual command available.
+	SweepInterval time.Duration
+	// ImageDays is how long images of an ordinary scan are kept.
+	ImageDays int
+	// FlaggedImageDays is the longer window for scans with safety flags. It
+	// must be at least ImageDays.
+	FlaggedImageDays int
+	// BatchSize bounds one query and one pass's memory use.
+	BatchSize int
 }
 
 // HTTP holds the HTTP server settings.
@@ -382,6 +403,13 @@ func LoadFrom(environ []string) (Config, error) {
 		Web: Web{
 			Dir: l.str("WEB_DIR", "web"),
 		},
+		Retention: Retention{
+			Enabled:          l.boolean("RETENTION_ENABLED", true),
+			SweepInterval:    l.duration("RETENTION_SWEEP_INTERVAL", 6*time.Hour),
+			ImageDays:        l.positiveInt("RETENTION_IMAGE_DAYS", 30),
+			FlaggedImageDays: l.positiveInt("RETENTION_FLAGGED_IMAGE_DAYS", 365),
+			BatchSize:        l.positiveInt("RETENTION_BATCH_SIZE", 500),
+		},
 		Assistant: Assistant{
 			Provider:         l.oneOf("ASSISTANT_LLM_PROVIDER", "fake", "fake", "claude", "openai"),
 			Model:            l.str("ASSISTANT_MODEL", ""),
@@ -438,6 +466,9 @@ func LoadFrom(environ []string) (Config, error) {
 	}
 	if cfg.Scan.MaxRequestBytes < cfg.Scan.MaxImageBytes*int64(cfg.Scan.MaxImages) {
 		l.add("SCAN_MAX_REQUEST_BYTES", "must be at least SCAN_MAX_IMAGE_BYTES * SCAN_MAX_IMAGES")
+	}
+	if cfg.Retention.FlaggedImageDays < cfg.Retention.ImageDays {
+		l.add("RETENTION_FLAGGED_IMAGE_DAYS", "must be at least RETENTION_IMAGE_DAYS; a flagged case cannot expire sooner than an ordinary one")
 	}
 	if cfg.Vision.Provider != "fake" {
 		if cfg.Vision.Model == "" {

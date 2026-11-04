@@ -41,6 +41,8 @@ type Querier interface {
 	// atomically with each terminal scan result, so a retry never leaves stale
 	// rows behind.
 	DeleteSafetyFlagsForScan(ctx context.Context, scanID uuid.UUID) error
+	DeleteScanByID(ctx context.Context, scanID uuid.UUID) (int64, error)
+	DeleteScanImageByID(ctx context.Context, id int64) error
 	EnsureUsageRow(ctx context.Context, arg EnsureUsageRowParams) error
 	// A terminal write only applies to a row this worker claimed.
 	FinishScan(ctx context.Context, arg FinishScanParams) (int64, error)
@@ -97,8 +99,14 @@ type Querier interface {
 	ListRAGChunksForProduct(ctx context.Context, arg ListRAGChunksForProductParams) ([]ListRAGChunksForProductRow, error)
 	ListRAGDocumentSections(ctx context.Context, documentID int64) ([]ListRAGDocumentSectionsRow, error)
 	ListRecentSyncRuns(ctx context.Context, rowLimit int32) ([]SyncRun, error)
+	// Queries for phase 12 data retention and erasure. Retention never deletes the
+	// scan row itself: the result, flags, and audit trail stay, while the images
+	// (the personal data) go. Flagged scans keep their images for a longer review
+	// window, which is the documented exception path.
+	ListRetentionImages(ctx context.Context, arg ListRetentionImagesParams) ([]ListRetentionImagesRow, error)
 	ListSMPCSections(ctx context.Context, documentID int64) ([]SmpcSection, error)
 	ListSafetyFlagsForScan(ctx context.Context, scanID uuid.UUID) ([]SafetyFlag, error)
+	ListScanImageKeys(ctx context.Context, scanID uuid.UUID) ([]string, error)
 	ListScanImages(ctx context.Context, scanID uuid.UUID) ([]ScanImage, error)
 	// Replay reads only stored output: no images and no clock.
 	ListScoredScanResults(ctx context.Context, rowLimit int32) ([]ListScoredScanResultsRow, error)
