@@ -91,6 +91,21 @@ available. A case must state which outcome was confirmed and the evidence
 reference; a screenshot or single reviewer is not ground truth. No verdict
 dataset is committed yet.
 
+## Judge calibration file
+
+A judge is not used for release decisions until its agreement with human
+labels is measured. The calibration file is JSONL, one pair per line:
+
+```json
+{"id": "case-id", "human": "supported", "judge": "unsupported"}
+```
+
+`human` is the agreed two-person label; `judge` is the judge's label for the
+same case. The declared label set is passed with `-values`. The runner computes
+Cohen's kappa and a confusion table, and refuses to call the judge calibrated
+unless the project lead's agreed kappa floor and minimum pair count are met.
+The file contains no answer text.
+
 ## Splits and leakage
 
 - `dev` may be used for prompt, model, rule, and threshold tuning.

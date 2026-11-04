@@ -78,6 +78,14 @@ keep the test split honest. They apply to every component.
 - Do not merge verdicts across different evidence types; a batch mismatch and a
   watchlist hit are different outcomes.
 
+## Judge calibration
+
+A judge may only be used where rule checks are insufficient, and only after
+agreement with human labels is measured. Two people label the calibration set.
+The runner reports Cohen's kappa; the project lead sets the floor. Until then,
+the judge must not appear in any release gate. The format is in
+[schema.md](schema.md#judge-calibration-file).
+
 ## Review and change control
 
 - A published dataset version is immutable. Add cases in a new version.

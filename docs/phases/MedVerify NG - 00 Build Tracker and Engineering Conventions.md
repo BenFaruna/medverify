@@ -23,7 +23,7 @@ Update the Status column as work progresses (Not started, In progress, In review
 | 07 | Verdict engine | 05, 06 | 1 | In review |
 | 08 | Leaflet indexing (RAG) | 02 | 2 | In review |
 | 09 | Grounded Q and A assistant | 07, 08 | 3-4 | In review |
-| 10 | Evals and guardrails | starts with 04, runs to the end | ongoing | Not started |
+| 10 | Evals and guardrails | starts with 04, runs to the end | ongoing | In review |
 | 11 | Integrator API and web MVP | 07, 09 | 3 | Not started |
 | 12 | Hardening and pilot readiness | all | 2-3 | Not started |
 
@@ -142,3 +142,6 @@ A task is done only when all of these are true:
 | Watchlist sources and who reviews entries | Project lead with a pharmacist | 06 |
 | Whether the assistant may relay leaflet dosage text (default: no, link only) | Project lead and pharmacist | 09 |
 | Strength tolerance for label versus registry comparison | Pharmacist | 06 |
+| Eval gate thresholds and who may approve an exception | Project lead | 10 |
+| Judge model, judge prompt, kappa floor, and minimum calibration sample | Project lead and engineering | 10 |
+| Ownership and consent process for extraction photos and assistant question corpora | Project lead and legal | 10 |

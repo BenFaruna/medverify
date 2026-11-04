@@ -65,6 +65,14 @@ go run ./cmd/eval assistant \
 # Extraction and retrieval call real providers/DB; CI must not run them.
 go run ./cmd/eval extraction -manifest testdata/eval/extraction.json -gates evals/gates/extraction.proposed.yaml
 go run ./cmd/eval retrieval -file testdata/rag/eval-draft.yaml -gates evals/gates/retrieval.proposed.yaml
+
+# Verdict replay over normalised signals (offline)
+go run ./cmd/eval verdict -dataset evals/fixtures/verdict-format -split test \
+  -gates evals/gates/verdict.proposed.yaml
+
+# Judge calibration against agreed human labels and an agreed kappa floor
+go run ./cmd/eval judge-calibration -labels <pairs.jsonl> \
+  -values supported,unsupported -min-kappa <agreed> -min-cases <agreed>
 ```
 
 A failing gate exits non-zero after writing the report. The report header
