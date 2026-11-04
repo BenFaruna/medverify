@@ -113,10 +113,21 @@ type Greenbook struct {
 	AnomalyMaxParseFailurePercent float64
 }
 
-// API holds the placeholder API authentication setting. Phase 11 replaces the
-// single key with rows in api_clients.
+// API holds the integrator API settings.
 type API struct {
-	Key string
+	// LegacyKey is the single shared key accepted by local development. It is
+	// rejected in production: every production caller must have a
+	// database-backed identity with its own scopes and quotas.
+	LegacyKey string
+	// CORSOrigins allowlists browser origins for /v1. An empty list sends no
+	// CORS headers at all, which blocks browser callers rather than allowing
+	// every origin. A wildcard is rejected in production.
+	CORSOrigins []string
+	// RatePerMin bounds requests per key per minute; IPRatePerMin bounds
+	// requests per calling address. RateLimitBurst is the bucket size.
+	RatePerMin     int
+	IPRatePerMin   int
+	RateLimitBurst int
 }
 
 // Vision holds provider selection, resilience, and pricing for label
@@ -254,8 +265,15 @@ func LoadFrom(environ []string) (Config, error) {
 	}
 
 	l := &loader{env: env}
+	appEnv := Environment(l.oneOf("APP_ENV", string(EnvDevelopment), string(EnvDevelopment), string(EnvTest), string(EnvProduction)))
+	// The development key is a convenience default. Production must never
+	// inherit it, or a misconfigured deploy would accept a well-known secret.
+	legacyKeyDefault := "dev-api-key"
+	if appEnv == EnvProduction {
+		legacyKeyDefault = ""
+	}
 	cfg := Config{
-		Env:      Environment(l.oneOf("APP_ENV", string(EnvDevelopment), string(EnvDevelopment), string(EnvTest), string(EnvProduction))),
+		Env:      appEnv,
 		LogLevel: l.oneOf("LOG_LEVEL", "info", "debug", "info", "warn", "error"),
 		HTTP: HTTP{
 			Addr:            l.str("HTTP_ADDR", ":8080"),
@@ -303,7 +321,11 @@ func LoadFrom(environ []string) (Config, error) {
 			AnomalyMaxParseFailurePercent: l.percent("GREENBOOK_ANOMALY_MAX_PARSE_FAILURE_PERCENT", 10),
 		},
 		API: API{
-			Key: l.str("API_KEY", "dev-api-key"),
+			LegacyKey:      l.str("API_LEGACY_KEY", legacyKeyDefault),
+			CORSOrigins:    l.csv("API_CORS_ORIGINS", ""),
+			RatePerMin:     l.positiveInt("API_RATE_PER_MIN", 60),
+			IPRatePerMin:   l.positiveInt("API_IP_RATE_PER_MIN", 240),
+			RateLimitBurst: l.positiveInt("API_RATE_LIMIT_BURST", 30),
 		},
 		Scan: Scan{
 			MaxImages:       l.positiveInt("SCAN_MAX_IMAGES", 4),
@@ -377,8 +399,17 @@ func LoadFrom(environ []string) (Config, error) {
 	if len(cfg.Greenbook.AllowedHosts) == 0 {
 		l.add("GREENBOOK_ALLOWED_HOSTS", "must list at least one leaflet host")
 	}
-	if cfg.Env == EnvProduction && cfg.API.Key == "dev-api-key" {
-		l.add("API_KEY", "must not use the development default in production")
+	if cfg.Env == EnvProduction && cfg.API.LegacyKey != "" {
+		l.add("API_LEGACY_KEY", "must be empty in production; issue database-backed API keys instead")
+	}
+	for _, origin := range cfg.API.CORSOrigins {
+		if origin == "*" {
+			l.add("API_CORS_ORIGINS", "must list exact origins, not a wildcard")
+			break
+		}
+	}
+	if cfg.Env == EnvProduction && len(cfg.API.CORSOrigins) == 0 {
+		l.add("API_CORS_ORIGINS", "must name at least one web client origin in production")
 	}
 	if cfg.Scan.MaxRequestBytes < cfg.Scan.MaxImageBytes*int64(cfg.Scan.MaxImages) {
 		l.add("SCAN_MAX_REQUEST_BYTES", "must be at least SCAN_MAX_IMAGE_BYTES * SCAN_MAX_IMAGES")

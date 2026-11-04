@@ -17,11 +17,13 @@ import (
 
 	"github.com/benfaruna/medverify/internal/assistant"
 	"github.com/benfaruna/medverify/internal/llm"
+	"github.com/benfaruna/medverify/internal/platform/auth"
 	"github.com/benfaruna/medverify/internal/platform/config"
 	"github.com/benfaruna/medverify/internal/platform/db"
 	"github.com/benfaruna/medverify/internal/platform/httpx"
 	"github.com/benfaruna/medverify/internal/platform/jobs"
 	"github.com/benfaruna/medverify/internal/platform/logging"
+	"github.com/benfaruna/medverify/internal/platform/ratelimit"
 	"github.com/benfaruna/medverify/internal/rag"
 	"github.com/benfaruna/medverify/internal/scan"
 	"github.com/benfaruna/medverify/internal/storage"
@@ -112,7 +114,14 @@ func run() error {
 		ReadyTimeout:   cfg.HTTP.RequestTimeout,
 		RequestTimeout: cfg.HTTP.RequestTimeout,
 		MaxBodyBytes:   cfg.HTTP.MaxBodyBytes,
-		APIKey:         cfg.API.Key,
+		Auth:           buildKeyStore(cfg, pool, logger),
+		Usage:          auth.NewDBUsageStore(pool),
+		Limiter:        ratelimit.New(),
+		RatePerMin:     cfg.API.RatePerMin,
+		IPRatePerMin:   cfg.API.IPRatePerMin,
+		RateLimitBurst: cfg.API.RateLimitBurst,
+		CORSOrigins:    cfg.API.CORSOrigins,
+		APIKey:         cfg.API.LegacyKey,
 		Scan: scan.NewHTTPHandler(scan.HTTPOptions{
 			Service:         scanService,
 			Logger:          logger,
@@ -139,6 +148,17 @@ func run() error {
 	}
 	logger.Info("api stopped")
 	return nil
+}
+
+// buildKeyStore returns the database-backed key store, or the legacy single
+// key in development. Configuration rejects a legacy key in production, so the
+// fallback cannot reach a production deployment.
+func buildKeyStore(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) auth.Store {
+	if cfg.API.LegacyKey != "" {
+		logger.Warn("using the legacy single API key; issue database-backed keys instead")
+		return auth.NewSingleKeyStore(auth.SingleKeyOptions{Key: cfg.API.LegacyKey})
+	}
+	return auth.NewDBStore(pool)
 }
 
 func buildAssistant(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, scans assistant.ScanSource) (*assistant.HTTPHandler, error) {

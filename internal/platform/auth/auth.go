@@ -59,6 +59,11 @@ type Principal struct {
 	Scopes     []string
 	Sandbox    bool
 	ClientName string
+	// RatePerMin and the daily quotas come from the key's client row so the
+	// middleware never hard-codes a plan. Zero means "not configured".
+	RatePerMin        int32
+	DailyRequestQuota int32
+	DailyScanQuota    int32
 }
 
 // TenantKey is the stable, non-secret identifier that scopes stored rows to
@@ -103,10 +108,13 @@ func APIKey(store Store) func(http.Handler) http.Handler {
 			}
 
 			principal := &Principal{
-				ClientID:   key.ClientID,
-				Scopes:     key.Scopes,
-				Sandbox:    key.Sandbox,
-				ClientName: key.ClientName,
+				ClientID:          key.ClientID,
+				Scopes:            key.Scopes,
+				Sandbox:           key.Sandbox,
+				ClientName:        key.ClientName,
+				RatePerMin:        key.RatePerMin,
+				DailyRequestQuota: key.DailyRequestQuota,
+				DailyScanQuota:    key.DailyScanQuota,
 			}
 			ctx := context.WithValue(r.Context(), principalKey{}, principal)
 			next.ServeHTTP(w, r.WithContext(ctx))

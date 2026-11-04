@@ -13,6 +13,7 @@ import (
 	"github.com/benfaruna/medverify/internal/assistant"
 	"github.com/benfaruna/medverify/internal/platform/auth"
 	"github.com/benfaruna/medverify/internal/platform/httpx"
+	"github.com/benfaruna/medverify/internal/platform/ratelimit"
 	"github.com/benfaruna/medverify/internal/scan"
 )
 
@@ -32,10 +33,23 @@ type Options struct {
 	MaxBodyBytes   int64
 	// Auth is the database-backed key store. When it is nil and APIKey is set,
 	// the legacy single-key mode is used; that mode is development only.
-	Auth      auth.Store
-	APIKey    string
-	Scan      *scan.HTTPHandler
-	Assistant *assistant.HTTPHandler
+	Auth auth.Store
+	// Usage enforces daily quotas. A nil store skips quota checks, which is
+	// what the legacy single-key mode and unit tests need.
+	Usage auth.UsageStore
+	// Limiter holds the per-key and per-IP token buckets. A nil limiter
+	// disables rate limiting.
+	Limiter *ratelimit.Limiter
+	// RatePerMin and IPRatePerMin bound requests per key and per address;
+	// RateLimitBurst is the token bucket size.
+	RatePerMin     int
+	IPRatePerMin   int
+	RateLimitBurst int
+	// CORSOrigins allowlists browser origins. Empty disables CORS headers.
+	CORSOrigins []string
+	APIKey      string
+	Scan        *scan.HTTPHandler
+	Assistant   *assistant.HTTPHandler
 }
 
 // NewHandler builds the router: middleware, health endpoints, and the problem
@@ -61,6 +75,7 @@ func NewHandler(opts Options) http.Handler {
 	router.Use(httpx.AccessLog(logger))
 	router.Use(httpx.Timeout(opts.RequestTimeout))
 	router.Use(httpx.MaxBodyBytesExcept(opts.MaxBodyBytes, "/v1/scans"))
+	router.Use(httpx.CORS(opts.CORSOrigins))
 
 	router.NotFound(httpx.NotFoundHandler().ServeHTTP)
 	router.MethodNotAllowed(httpx.MethodNotAllowedHandler().ServeHTTP)
@@ -75,20 +90,56 @@ func NewHandler(opts Options) http.Handler {
 		}
 
 		router.Route("/v1", func(r chi.Router) {
+			// Address-level limiting runs before authentication so an unknown
+			// caller cannot hammer the key lookup.
+			r.Use(auth.IPRateLimit(opts.Limiter, opts.IPRatePerMin, opts.RateLimitBurst))
 			// A nil store means no key can authenticate: every route below fails
 			// closed with 401 rather than serving unauthenticated traffic.
 			r.Use(auth.APIKey(store))
+			r.Use(auth.RateLimit(auth.RateLimitOptions{
+				Limiter:           opts.Limiter,
+				DefaultRatePerMin: opts.RatePerMin,
+				DefaultBurst:      opts.RateLimitBurst,
+			}))
 
-			r.With(auth.RequireScope(auth.ScopeScansWrite)).Post("/scans", opts.Scan.Create)
-			r.With(auth.RequireScope(auth.ScopeScansRead)).Get("/scans/{id}", opts.Scan.Get)
+			// Every request counts against the daily request quota; the scan
+			// route additionally counts a scan.
+			scanWrite := chain(auth.RequireScope(auth.ScopeScansWrite), auth.Quota(opts.Usage, auth.QuotaScans))
+			scanRead := chain(auth.RequireScope(auth.ScopeScansRead), auth.Quota(opts.Usage, auth.QuotaRequests))
+			questionWrite := chain(auth.RequireScope(auth.ScopeQuestionsWrite), auth.Quota(opts.Usage, auth.QuotaQuestions))
+
+			r.Group(func(r chi.Router) {
+				r.Use(scanWrite)
+				r.Post("/scans", opts.Scan.Create)
+			})
+			r.Group(func(r chi.Router) {
+				r.Use(scanRead)
+				r.Get("/scans/{id}", opts.Scan.Get)
+			})
 			if opts.Assistant != nil {
-				r.With(auth.RequireScope(auth.ScopeQuestionsWrite)).Post("/scans/{id}/questions", opts.Assistant.Ask)
-				r.With(auth.RequireScope(auth.ScopeScansRead)).Get("/scans/{id}/conversation", opts.Assistant.Conversation)
+				r.Group(func(r chi.Router) {
+					r.Use(questionWrite)
+					r.Post("/scans/{id}/questions", opts.Assistant.Ask)
+				})
+				r.Group(func(r chi.Router) {
+					r.Use(scanRead)
+					r.Get("/scans/{id}/conversation", opts.Assistant.Conversation)
+				})
 			}
 		})
 	}
 
 	return router
+}
+
+// chain applies middlewares in order, so the first one runs first.
+func chain(middlewares ...func(http.Handler) http.Handler) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		for i := len(middlewares) - 1; i >= 0; i-- {
+			next = middlewares[i](next)
+		}
+		return next
+	}
 }
 
 // healthz reports that the process is alive. It never touches a dependency, so

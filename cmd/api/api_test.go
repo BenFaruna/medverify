@@ -12,7 +12,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/benfaruna/medverify/internal/platform/auth"
 	"github.com/benfaruna/medverify/internal/platform/httpx"
+	"github.com/benfaruna/medverify/internal/platform/ratelimit"
 	"github.com/benfaruna/medverify/internal/scan"
 	"github.com/google/uuid"
 )
@@ -168,6 +170,74 @@ func TestScanGetRejectsMalformedID(t *testing.T) {
 	handler.ServeHTTP(recorder, request)
 
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+}
+
+func TestScanCreateRequiresTheWriteScope(t *testing.T) {
+	t.Parallel()
+
+	// A read-only key must not be able to create a scan, even though it
+	// authenticates successfully.
+	store := auth.NewSingleKeyStore(auth.SingleKeyOptions{
+		Key:    "mv_readonly_secret",
+		Scopes: []string{auth.ScopeScansRead},
+	})
+	handler := NewHandler(Options{
+		Auth: store,
+		Scan: scan.NewHTTPHandler(scan.HTTPOptions{MaxImages: 4, MaxImageBytes: 1 << 20, MaxRequestBytes: 1 << 20}),
+	})
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/scans", nil)
+	request.Header.Set(auth.HeaderAPIKey, "mv_readonly_secret")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	assert.Equal(t, http.StatusForbidden, recorder.Code)
+
+	var problem httpx.Problem
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &problem))
+	assert.Equal(t, httpx.CodeInsufficientScope, problem.Code)
+}
+
+func TestRateLimitReturnsRetryAfter(t *testing.T) {
+	t.Parallel()
+
+	store := auth.NewSingleKeyStore(auth.SingleKeyOptions{Key: "mv_fast_secret", RatePerMin: 60})
+	handler := NewHandler(Options{
+		Auth:           store,
+		Limiter:        ratelimit.New(),
+		RatePerMin:     60,
+		RateLimitBurst: 1,
+		Scan:           scan.NewHTTPHandler(scan.HTTPOptions{MaxImages: 4, MaxImageBytes: 1 << 20, MaxRequestBytes: 1 << 20}),
+	})
+
+	var last *httptest.ResponseRecorder
+	for i := 0; i < 2; i++ {
+		request := httptest.NewRequest(http.MethodGet, "/v1/scans/not-a-uuid", nil)
+		request.Header.Set(auth.HeaderAPIKey, "mv_fast_secret")
+		last = httptest.NewRecorder()
+		handler.ServeHTTP(last, request)
+	}
+
+	assert.Equal(t, http.StatusTooManyRequests, last.Code)
+	assert.NotEmpty(t, last.Header().Get("Retry-After"))
+}
+
+func TestCORSHeadersOnlyForAllowlistedOrigin(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(Options{CORSOrigins: []string{"https://app.medverify.test"}})
+
+	allowed := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	allowed.Header.Set("Origin", "https://app.medverify.test")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, allowed)
+	assert.Equal(t, "https://app.medverify.test", recorder.Header().Get("Access-Control-Allow-Origin"))
+
+	blocked := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	blocked.Header.Set("Origin", "https://evil.example")
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, blocked)
+	assert.Empty(t, recorder.Header().Get("Access-Control-Allow-Origin"))
 }
 
 func TestReadinessResponseIsNotCached(t *testing.T) {

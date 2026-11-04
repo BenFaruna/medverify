@@ -38,7 +38,7 @@ func TestLoadFromValidEnvironment(t *testing.T) {
 	assert.False(t, cfg.Storage.UseSSL)
 	assert.Equal(t, 4, cfg.Jobs.Concurrency)
 
-	assert.Equal(t, "dev-api-key", cfg.API.Key)
+	assert.Equal(t, "dev-api-key", cfg.API.LegacyKey)
 	assert.Equal(t, 4, cfg.Scan.MaxImages)
 	assert.Equal(t, int64(10<<20), cfg.Scan.MaxImageBytes)
 	assert.Equal(t, int64(45<<20), cfg.Scan.MaxRequestBytes)
@@ -83,8 +83,8 @@ func TestLoadFromOverridesDefaults(t *testing.T) {
 	env := append(baseEnv(),
 		"APP_ENV=production",
 		"LOG_LEVEL=debug",
-		"API_KEY=production-key",
 		"HTTP_ADDR=0.0.0.0:9090",
+		"API_CORS_ORIGINS=https://app.medverify.test",
 		"HTTP_REQUEST_TIMEOUT=30s",
 		"HTTP_MAX_BODY_BYTES=4194304",
 		"DATABASE_MAX_CONNS=25",
@@ -121,7 +121,8 @@ func TestLoadFromOverridesDefaults(t *testing.T) {
 	assert.Equal(t, int32(5), cfg.Database.MinConns)
 	assert.True(t, cfg.Storage.UseSSL)
 	assert.Equal(t, 8, cfg.Jobs.Concurrency)
-	assert.Equal(t, "production-key", cfg.API.Key)
+	assert.Empty(t, cfg.API.LegacyKey, "production must not accept a shared legacy key")
+	assert.Equal(t, []string{"https://app.medverify.test"}, cfg.API.CORSOrigins)
 	assert.Equal(t, "claude", cfg.Vision.Provider)
 	assert.Equal(t, "claude-sonnet-4-5-20250929", cfg.Vision.Model)
 	assert.Contains(t, cfg.Secrets(), "test-vision-key")
@@ -278,7 +279,7 @@ func TestProductionRejectsTheFakeAssistantProvider(t *testing.T) {
 	t.Parallel()
 	env := append(baseEnv(),
 		"APP_ENV=production",
-		"API_KEY=production-key",
+		"API_CORS_ORIGINS=https://app.medverify.test",
 		"VISION_PROVIDER=claude",
 		"VISION_MODEL=claude-sonnet-4-5-20250929",
 		"VISION_API_KEY=test-vision-key",
