@@ -13,11 +13,15 @@ import (
 // New returns the configured provider. The fake is for development and tests;
 // production configuration rejects it. A fallback model is tried only when the
 // primary provider is unavailable, never when an image is unreadable.
+//
+// "claude" and "openai" are wire formats, not vendor commitments: "openai"
+// accepts any OpenAI-compatible chat completions endpoint, including Gemini's
+// compatibility API, Azure OpenAI, OpenRouter, Ollama, and vLLM.
 func New(cfg config.Vision) (vision.Provider, error) {
 	if cfg.Provider == "fake" {
 		return vision.NewFake(), nil
 	}
-	if cfg.Provider != "claude" {
+	if cfg.Provider != "claude" && cfg.Provider != "openai" {
 		return nil, fmt.Errorf("visioncfg: unsupported provider %q", cfg.Provider)
 	}
 
@@ -33,7 +37,11 @@ func New(cfg config.Vision) (vision.Provider, error) {
 		Cooldown:         cfg.CircuitCooldown,
 	}
 
-	primary, err := newClaude(cfg, prompt)
+	build := func(model string) (vision.Provider, error) {
+		return newProvider(cfg, model, prompt)
+	}
+
+	primary, err := build(cfg.Model)
 	if err != nil {
 		return nil, err
 	}
@@ -42,15 +50,7 @@ func New(cfg config.Vision) (vision.Provider, error) {
 	if cfg.FallbackModel == "" || cfg.FallbackModel == cfg.Model {
 		return provider, nil
 	}
-	fallback, err := newClaude(config.Vision{
-		Provider:             cfg.Provider,
-		Model:                cfg.FallbackModel,
-		APIKey:               cfg.APIKey,
-		BaseURL:              cfg.BaseURL,
-		MaxTokens:            cfg.MaxTokens,
-		InputPricePerMToken:  cfg.InputPricePerMToken,
-		OutputPricePerMToken: cfg.OutputPricePerMToken,
-	}, prompt)
+	fallback, err := build(cfg.FallbackModel)
 	if err != nil {
 		return nil, err
 	}
@@ -60,14 +60,29 @@ func New(cfg config.Vision) (vision.Provider, error) {
 	}, nil
 }
 
-func newClaude(cfg config.Vision, prompt vision.Prompt) (vision.Provider, error) {
-	return vision.NewClaude(vision.ClaudeOptions{
-		APIKey:      cfg.APIKey,
-		BaseURL:     cfg.BaseURL,
-		Model:       cfg.Model,
-		MaxTokens:   cfg.MaxTokens,
-		Prompt:      prompt,
-		InputPrice:  cfg.InputPricePerMToken,
-		OutputPrice: cfg.OutputPricePerMToken,
-	})
+func newProvider(cfg config.Vision, model string, prompt vision.Prompt) (vision.Provider, error) {
+	switch cfg.Provider {
+	case "claude":
+		return vision.NewClaude(vision.ClaudeOptions{
+			APIKey:      cfg.APIKey,
+			BaseURL:     cfg.BaseURL,
+			Model:       model,
+			MaxTokens:   cfg.MaxTokens,
+			Prompt:      prompt,
+			InputPrice:  cfg.InputPricePerMToken,
+			OutputPrice: cfg.OutputPricePerMToken,
+		})
+	case "openai":
+		return vision.NewOpenAI(vision.OpenAIOptions{
+			APIKey:      cfg.APIKey,
+			BaseURL:     cfg.BaseURL,
+			Model:       model,
+			MaxTokens:   cfg.MaxTokens,
+			Prompt:      prompt,
+			InputPrice:  cfg.InputPricePerMToken,
+			OutputPrice: cfg.OutputPricePerMToken,
+		})
+	default:
+		return nil, fmt.Errorf("visioncfg: unsupported provider %q", cfg.Provider)
+	}
 }

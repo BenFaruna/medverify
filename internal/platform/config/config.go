@@ -383,11 +383,11 @@ func LoadFrom(environ []string) (Config, error) {
 			Dir: l.str("WEB_DIR", "web"),
 		},
 		Assistant: Assistant{
-			Provider:         l.oneOf("ASSISTANT_LLM_PROVIDER", "fake", "fake", "claude"),
+			Provider:         l.oneOf("ASSISTANT_LLM_PROVIDER", "fake", "fake", "claude", "openai"),
 			Model:            l.str("ASSISTANT_MODEL", ""),
 			SmallModel:       l.str("ASSISTANT_SMALL_MODEL", ""),
 			APIKey:           l.str("ASSISTANT_API_KEY", ""),
-			BaseURL:          l.str("ASSISTANT_BASE_URL", "https://api.anthropic.com"),
+			BaseURL:          l.str("ASSISTANT_BASE_URL", ""),
 			MaxTokens:        l.positiveInt("ASSISTANT_MAX_TOKENS", 1024),
 			Timeout:          l.duration("ASSISTANT_TIMEOUT", 30*time.Second),
 			MaxSteps:         l.positiveInt("ASSISTANT_MAX_STEPS", 4),
@@ -399,11 +399,11 @@ func LoadFrom(environ []string) (Config, error) {
 			Languages:        l.csv("ASSISTANT_LANGUAGES", "en"),
 		},
 		Vision: Vision{
-			Provider:                l.oneOf("VISION_PROVIDER", "fake", "fake", "claude"),
+			Provider:                l.oneOf("VISION_PROVIDER", "fake", "fake", "claude", "openai"),
 			Model:                   l.str("VISION_MODEL", ""),
 			FallbackModel:           l.str("VISION_FALLBACK_MODEL", ""),
 			APIKey:                  l.str("VISION_API_KEY", ""),
-			BaseURL:                 l.str("VISION_BASE_URL", "https://api.anthropic.com"),
+			BaseURL:                 l.str("VISION_BASE_URL", ""),
 			MaxTokens:               l.positiveInt("VISION_MAX_TOKENS", 4096),
 			Timeout:                 l.duration("VISION_TIMEOUT", 45*time.Second),
 			Retries:                 l.nonNegativeInt("VISION_RETRIES", 2),
@@ -439,12 +439,12 @@ func LoadFrom(environ []string) (Config, error) {
 	if cfg.Scan.MaxRequestBytes < cfg.Scan.MaxImageBytes*int64(cfg.Scan.MaxImages) {
 		l.add("SCAN_MAX_REQUEST_BYTES", "must be at least SCAN_MAX_IMAGE_BYTES * SCAN_MAX_IMAGES")
 	}
-	if cfg.Vision.Provider == "claude" {
+	if cfg.Vision.Provider != "fake" {
 		if cfg.Vision.Model == "" {
-			l.add("VISION_MODEL", "is required when VISION_PROVIDER=claude; pin an exact model id")
+			l.add("VISION_MODEL", "is required for a real provider; pin an exact model id")
 		}
 		if cfg.Vision.APIKey == "" {
-			l.add("VISION_API_KEY", "is required when VISION_PROVIDER=claude")
+			l.add("VISION_API_KEY", "is required for a real provider")
 		}
 	}
 	if cfg.Env == EnvProduction && cfg.Vision.Provider == "fake" {
@@ -452,15 +452,15 @@ func LoadFrom(environ []string) (Config, error) {
 	}
 	l.validateHTTPURL("VISION_BASE_URL", cfg.Vision.BaseURL)
 
-	if cfg.Assistant.Provider == "claude" {
+	if cfg.Assistant.Provider != "fake" {
 		if cfg.Assistant.Model == "" {
-			l.add("ASSISTANT_MODEL", "is required when ASSISTANT_LLM_PROVIDER=claude; pin an exact model id")
+			l.add("ASSISTANT_MODEL", "is required for a real provider; pin an exact model id")
 		}
 		if cfg.Assistant.SmallModel == "" {
-			l.add("ASSISTANT_SMALL_MODEL", "is required when ASSISTANT_LLM_PROVIDER=claude; pin an exact router/verifier model id")
+			l.add("ASSISTANT_SMALL_MODEL", "is required for a real provider; pin the router/verifier model id")
 		}
 		if cfg.Assistant.APIKey == "" {
-			l.add("ASSISTANT_API_KEY", "is required when ASSISTANT_LLM_PROVIDER=claude")
+			l.add("ASSISTANT_API_KEY", "is required for a real provider")
 		}
 	}
 	if cfg.Env == EnvProduction && cfg.Assistant.Provider == "fake" {

@@ -271,6 +271,11 @@ func newChatClient(cfg config.Config, model string) (llm.Client, error) {
 			APIKey: cfg.Assistant.APIKey, BaseURL: cfg.Assistant.BaseURL, Model: model,
 			MaxTokens: cfg.Assistant.MaxTokens, Timeout: cfg.Assistant.Timeout,
 		})
+	case "openai":
+		return llm.NewOpenAI(llm.OpenAIOptions{
+			APIKey: cfg.Assistant.APIKey, BaseURL: cfg.Assistant.BaseURL, Model: model,
+			MaxTokens: cfg.Assistant.MaxTokens, Timeout: cfg.Assistant.Timeout,
+		})
 	default:
 		return nil, fmt.Errorf("assistant: unknown provider %q", cfg.Assistant.Provider)
 	}

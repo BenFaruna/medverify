@@ -300,3 +300,62 @@ func TestClaudeAssistantRequiresPinnedModels(t *testing.T) {
 	assert.Contains(t, err.Error(), "ASSISTANT_MODEL")
 	assert.Contains(t, err.Error(), "ASSISTANT_SMALL_MODEL")
 }
+
+func TestOpenAICompatibleProvidersAreAccepted(t *testing.T) {
+	t.Parallel()
+
+	env := append(baseEnv(),
+		"VISION_PROVIDER=openai",
+		"VISION_MODEL=gpt-5-mini-2025-08-07",
+		"VISION_API_KEY=test-vision-key",
+		"VISION_BASE_URL=https://api.openai.com/v1",
+		"ASSISTANT_LLM_PROVIDER=openai",
+		"ASSISTANT_MODEL=gpt-5-2025-08-07",
+		"ASSISTANT_SMALL_MODEL=gpt-5-mini-2025-08-07",
+		"ASSISTANT_API_KEY=test-assistant-key",
+		"ASSISTANT_BASE_URL=https://api.openai.com/v1",
+	)
+	cfg, err := config.LoadFrom(env)
+	require.NoError(t, err)
+
+	assert.Equal(t, "openai", cfg.Vision.Provider)
+	assert.Equal(t, "openai", cfg.Assistant.Provider)
+	assert.Equal(t, "https://api.openai.com/v1", cfg.Vision.BaseURL)
+}
+
+func TestRealProvidersRequirePinnedModelsAndKeys(t *testing.T) {
+	t.Parallel()
+
+	for _, provider := range []string{"claude", "openai"} {
+		provider := provider
+		t.Run(provider, func(t *testing.T) {
+			t.Parallel()
+
+			env := append(baseEnv(),
+				"VISION_PROVIDER="+provider,
+				"ASSISTANT_LLM_PROVIDER="+provider,
+			)
+			_, err := config.LoadFrom(env)
+			require.Error(t, err)
+			for _, field := range []string{
+				"VISION_MODEL", "VISION_API_KEY",
+				"ASSISTANT_MODEL", "ASSISTANT_SMALL_MODEL", "ASSISTANT_API_KEY",
+			} {
+				assert.Contains(t, err.Error(), field)
+			}
+		})
+	}
+}
+
+func TestUnknownProvidersAreRejected(t *testing.T) {
+	t.Parallel()
+
+	env := append(baseEnv(),
+		"VISION_PROVIDER=gemini-native",
+		"ASSISTANT_LLM_PROVIDER=gemini-native",
+	)
+	_, err := config.LoadFrom(env)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "VISION_PROVIDER")
+	assert.Contains(t, err.Error(), "ASSISTANT_LLM_PROVIDER")
+}

@@ -89,7 +89,8 @@ curl localhost:8080/readyz
 ```
 
 Upload a pack photo (the default vision provider is a deterministic fake; set
-`VISION_PROVIDER=claude` with a key and pinned model for a real extraction):
+`VISION_PROVIDER=claude` or `openai` with a key and pinned model for a real
+extraction):
 
 ```bash
 curl -i -X POST localhost:8080/v1/scans \
@@ -103,6 +104,24 @@ curl -H "X-API-Key: dev-api-key" localhost:8080/v1/scans/<id>
 
 A result never says a medicine is safe, genuine, or authentic. `unreadable`
 means the photo could not be read confidently, not that the product is fake.
+
+### Model providers
+
+Vision and assistant providers are selected independently:
+
+| Value | Wire format | Typical endpoints |
+| --- | --- | --- |
+| `fake` | deterministic local stub | development and CI only; rejected in production |
+| `claude` | Anthropic Messages API | `https://api.anthropic.com` |
+| `openai` | OpenAI chat completions | OpenAI, Gemini compatibility API, Azure OpenAI, OpenRouter, Ollama, vLLM |
+
+`*_BASE_URL` is the API root including the version path, so the `openai`
+provider works with any compatible server by pointing it at, for example,
+`https://generativelanguage.googleapis.com/v1beta/openai` or
+`http://localhost:11434/v1`. An empty value selects the provider default. Model
+identifiers must be pinned: a floating alias is accepted by the provider but not
+by review. A `VISION_FALLBACK_MODEL` of the same provider is tried only when the
+primary is unavailable, never when an image is unreadable.
 
 Target: a healthy stack from a clean clone in under 15 minutes, including image
 pulls.
