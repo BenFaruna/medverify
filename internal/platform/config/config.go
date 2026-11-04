@@ -56,6 +56,13 @@ type Config struct {
 	Embeddings Embeddings
 	Assistant  Assistant
 	Webhook    Webhook
+	Web        Web
+}
+
+// Web holds the static MVP client settings. An empty Dir disables serving it,
+// which a deployment that hosts the client elsewhere wants.
+type Web struct {
+	Dir string
 }
 
 // Webhook holds outbound delivery settings. A per-endpoint secret signs each
@@ -371,6 +378,9 @@ func LoadFrom(environ []string) (Config, error) {
 		Webhook: Webhook{
 			Interval: l.duration("WEBHOOK_INTERVAL", 15*time.Second),
 			Timeout:  l.duration("WEBHOOK_TIMEOUT", 10*time.Second),
+		},
+		Web: Web{
+			Dir: l.str("WEB_DIR", "web"),
 		},
 		Assistant: Assistant{
 			Provider:         l.oneOf("ASSISTANT_LLM_PROVIDER", "fake", "fake", "claude"),

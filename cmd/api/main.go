@@ -105,8 +105,14 @@ func run() error {
 		return err
 	}
 
+	web, err := webClient(cfg.Web.Dir)
+	if err != nil {
+		return fmt.Errorf("serve web client: %w", err)
+	}
+
 	handler := NewHandler(Options{
 		Logger: logger,
+		Web:    web,
 		Dependencies: []Dependency{
 			{Name: "database", Check: func(ctx context.Context) error { return db.Ping(ctx, pool) }},
 			{Name: "storage", Check: store.Ping},

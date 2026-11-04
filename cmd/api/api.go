@@ -47,9 +47,11 @@ type Options struct {
 	RateLimitBurst int
 	// CORSOrigins allowlists browser origins. Empty disables CORS headers.
 	CORSOrigins []string
-	APIKey      string
-	Scan        *scan.HTTPHandler
-	Assistant   *assistant.HTTPHandler
+	// Web serves the static MVP client at /. Nil disables it.
+	Web       http.Handler
+	APIKey    string
+	Scan      *scan.HTTPHandler
+	Assistant *assistant.HTTPHandler
 }
 
 // NewHandler builds the router: middleware, health endpoints, and the problem
@@ -82,6 +84,12 @@ func NewHandler(opts Options) http.Handler {
 
 	router.Get("/healthz", healthz)
 	router.Get("/readyz", readyz(logger, opts.Dependencies, opts.ReadyTimeout))
+
+	// The MVP client is static and talks only to the public API. It is mounted
+	// after the probes so it can never shadow them.
+	if opts.Web != nil {
+		router.Mount("/", opts.Web)
+	}
 
 	if opts.Scan != nil {
 		store := opts.Auth

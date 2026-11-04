@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>MedVerify NG</title>
+    <link rel="stylesheet" href="assets/styles.css" />
+    <script type="module" src="assets/app.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to main content</a>
+
+    <header class="site-header">
+      <h1>MedVerify NG</h1>
+      <p class="tagline">Compare a medicine pack with NAFDAC records.</p>
+    </header>
+
+    <main id="main" class="wrap">
+      <!-- The disclaimer is always visible and never dismissed. -->
+      <p class="disclaimer" role="note">
+        This tool compares the pack photo with NAFDAC records. It is not medical
+        advice. Ask a pharmacist or doctor about your medicine.
+      </p>
+
+      <section aria-labelledby="connect-heading" class="card">
+        <h2 id="connect-heading">Your API key</h2>
+        <p class="hint">
+          The key stays in this tab's memory and is never saved to storage. You
+          will need to enter it again after a reload.
+        </p>
+        <div class="field">
+          <label for="api-key">API key</label>
+          <input
+            id="api-key"
+            name="api-key"
+            type="password"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="mv_..."
+            aria-describedby="api-key-help"
+          />
+          <p id="api-key-help" class="hint">
+            Sandbox keys return fixed results and cost nothing.
+          </p>
+        </div>
+        <div class="field">
+          <label for="api-base">API address</label>
+          <input id="api-base" name="api-base" type="url" value="" placeholder="https://api.example" />
+        </div>
+      </section>
+
+      <section aria-labelledby="upload-heading" class="card">
+        <h2 id="upload-heading">Photograph the pack</h2>
+        <p class="hint" id="photo-help">
+          Up to four photos. Include the front with the name, the back with the
+          NRN, and a side with the ingredients. Lay the pack flat, fill the
+          frame, and avoid glare.
+        </p>
+
+        <div class="field">
+          <label for="photos">Photos</label>
+          <input
+            id="photos"
+            name="photos"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            capture="environment"
+            multiple
+            aria-describedby="photo-help photo-count"
+          />
+          <p id="photo-count" class="hint" aria-live="polite">No photos selected.</p>
+        </div>
+
+        <div class="field">
+          <label for="language">Result language</label>
+          <select id="language" name="language">
+            <option value="en" selected>English</option>
+            <option value="pcm">Nigerian Pidgin</option>
+          </select>
+          <p class="hint">
+            Only English wording is reviewed; Pidgin falls back to English until
+            its copy is approved.
+          </p>
+        </div>
+
+        <button id="submit" type="button" class="primary">Check this pack</button>
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+      </section>
+
+      <section id="result-section" aria-labelledby="result-heading" class="card" hidden>
+        <!-- Focus lands here after a result so a screen reader announces it. -->
+        <h2 id="result-heading" tabindex="-1">Result</h2>
+        <div id="result" class="result"></div>
+        <button id="retake" type="button" class="secondary">Check another pack</button>
+      </section>
+
+      <section id="ask-section" aria-labelledby="ask-heading" class="card" hidden>
+        <h2 id="ask-heading">Ask about this pack</h2>
+        <div id="suggestions" class="suggestions" role="group" aria-label="Suggested questions"></div>
+        <form id="ask-form" class="ask-form">
+          <label for="question">Your question</label>
+          <div class="ask-row">
+            <input
+              id="question"
+              name="question"
+              type="text"
+              maxlength="500"
+              autocomplete="off"
+              aria-describedby="ask-help"
+            />
+            <button type="submit" class="primary">Ask</button>
+          </div>
+          <p id="ask-help" class="hint">
+            Answers come only from NAFDAC records and leaflets, with citations.
+            This is not medical advice.
+          </p>
+        </form>
+        <div id="answers" class="answers" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>
+        Not found in NAFDAC records does not mean a medicine is fake: our data
+        can be incomplete. An unreadable photo is not a judgement of the pack.
+      </p>
+    </footer>
+
+    <noscript>
+      <p class="wrap">This page needs JavaScript to upload photos.</p>
+    </noscript>
+  </body>
+</html>
