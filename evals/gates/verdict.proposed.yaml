@@ -1,0 +1,16 @@
+# PROPOSED verdict release gates.
+#
+# Engineering proposal only; not agreed by the project lead. No lab or regulator
+# confirmed verdict dataset exists yet, so these thresholds cannot be cited as
+# passed on real evidence.
+version: verdict-proposed-v0
+component: verdict
+thresholds:
+  # The displayed outcome must match the confirmed outcome.
+  verdict_accuracy: {min: 0.95}
+  # Never show a non-consistent case as consistent with records.
+  unwarranted_reassurance: {max: 0}
+  # A low-confidence read must stay unreadable rather than guess.
+  unreadable_recall: {min: 1.0}
+  # Required explanation codes must be present.
+  reason_recall: {min: 0.95}

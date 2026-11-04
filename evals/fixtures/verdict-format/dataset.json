@@ -1,0 +1,8 @@
+{
+  "name": "verdict-format-fixture",
+  "version": "2026-11-fixture",
+  "component": "verdict",
+  "description": "SYNTHETIC FORMAT FIXTURE ONLY. Exercises the deterministic verdict scorer; it contains no lab or regulator ground truth and is not quality evidence.",
+  "created_by": "engineering fixture",
+  "created_at": "2026-11-04"
+}

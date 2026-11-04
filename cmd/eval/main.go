@@ -6,6 +6,8 @@
 //	assistant   score a recorded assistant run against an assistant dataset
 //	extraction  score pack photos against an extraction manifest
 //	retrieval   score leaflet retrieval against a labelled question set
+//	verdict     replay normalised signals through the verdict rules
+//	judge-calibration  measure judge/human agreement before a judge is used
 //
 // Reports always carry the dataset version and hash, model, prompt version, and
 // rules version. A failing gate exits non-zero.
@@ -16,6 +18,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -29,6 +32,7 @@ import (
 	"github.com/benfaruna/medverify/internal/platform/config"
 	"github.com/benfaruna/medverify/internal/platform/db"
 	"github.com/benfaruna/medverify/internal/rag"
+	"github.com/benfaruna/medverify/internal/verdict"
 	"github.com/benfaruna/medverify/internal/vision"
 	"github.com/benfaruna/medverify/internal/vision/visioncfg"
 )
@@ -43,6 +47,8 @@ commands:
   assistant   score recorded assistant outputs against a dataset (offline)
   extraction  score pack photos against a labelled extraction manifest
   retrieval   score leaflet retrieval against a labelled question set
+  verdict     replay normalised signals through the verdict rules
+  judge-calibration  measure judge/human agreement before a judge is used
 
 Run "eval <command> -h" for command options.
 `
@@ -59,6 +65,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runExtraction(args[1:], stdout, stderr)
 	case "retrieval":
 		return runRetrieval(args[1:], stdout, stderr)
+	case "verdict":
+		return runVerdict(args[1:], stdout, stderr)
+	case "judge-calibration":
+		return runJudgeCalibration(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
 		return 0
@@ -75,6 +85,7 @@ func runAssistant(args []string, stdout, stderr io.Writer) int {
 	datasetDir := flags.String("dataset", "", "dataset directory containing dataset.json and cases.jsonl")
 	recordedPath := flags.String("recorded", "", "JSONL recorded assistant outputs")
 	split := flags.String("split", "dev", "dataset split: dev or test")
+	maxCost := flags.Float64("max-cost", 0, "fail if the recorded run cost exceeds this many USD (0 disables the cap)")
 	gatesPath := flags.String("gates", "", "gate file (optional)")
 	outDir := flags.String("out-dir", "", "directory for JSON and Markdown reports (optional)")
 	asJSON := flags.Bool("json", false, "print the JSON report instead of Markdown")
@@ -102,6 +113,9 @@ func runAssistant(args []string, stdout, stderr io.Writer) int {
 	report, err := eval.ScoreAssistant(dataset, selectedSplit, outputs, now())
 	if err != nil {
 		return fail(stderr, err)
+	}
+	if *maxCost > 0 && report.CostUSD > *maxCost {
+		return fail(stderr, fmt.Errorf("recorded run cost $%.4f exceeds the cap $%.4f", report.CostUSD, *maxCost))
 	}
 	return finishReport(report, *gatesPath, *outDir, *asJSON, stdout, stderr)
 }
@@ -229,14 +243,98 @@ func runRetrieval(args []string, stdout, stderr io.Writer) int {
 	report := eval.RetrievalReport(filepath.Base(*setPath), set.Version,
 		eval.HashBytes(setBytes), embedder.Model(), now(), source)
 
-	failures, err := loadGates(*gatesPath, report)
+	return finishReport(report, *gatesPath, *outDir, *asJSON, stdout, stderr)
+}
+
+func runVerdict(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("verdict", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	datasetDir := flags.String("dataset", "", "dataset directory containing dataset.json and cases.jsonl")
+	split := flags.String("split", "test", "dataset split: dev or test")
+	rulesPath := flags.String("rules", "", "verdict rules YAML (defaults to the embedded version)")
+	gatesPath := flags.String("gates", "", "gate file (optional)")
+	outDir := flags.String("out-dir", "", "directory for JSON and Markdown reports (optional)")
+	asJSON := flags.Bool("json", false, "print the JSON report instead of Markdown")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if *datasetDir == "" {
+		fmt.Fprintln(stderr, "eval: verdict requires -dataset")
+		return 2
+	}
+	selectedSplit := eval.Split(*split)
+	if !selectedSplit.Valid() {
+		fmt.Fprintf(stderr, "eval: -split must be dev or test, got %q\n", *split)
+		return 2
+	}
+	rules, err := verdict.LoadRules(*rulesPath)
 	if err != nil {
 		return fail(stderr, err)
 	}
-	if code := emit(report, *outDir, *asJSON, stdout, stderr); code != 0 {
-		return code
+	dataset, err := eval.LoadDataset(*datasetDir)
+	if err != nil {
+		return fail(stderr, err)
 	}
-	return gateExit(failures, stderr)
+	report, err := eval.ScoreVerdict(dataset, selectedSplit, rules, now())
+	if err != nil {
+		return fail(stderr, err)
+	}
+	return finishReport(report, *gatesPath, *outDir, *asJSON, stdout, stderr)
+}
+
+func runJudgeCalibration(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("judge-calibration", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	labelsPath := flags.String("labels", "", "JSONL human/judge label pairs")
+	values := flags.String("values", "", "comma-separated label values, e.g. supported,unsupported")
+	minKappa := flags.Float64("min-kappa", 0, "agreed kappa floor (required)")
+	minCases := flags.Int("min-cases", 0, "agreed minimum labelled pairs (required)")
+	asJSON := flags.Bool("json", false, "print the calibration as JSON")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if *labelsPath == "" || *values == "" {
+		fmt.Fprintln(stderr, "eval: judge-calibration requires -labels and -values")
+		return 2
+	}
+	if *minKappa <= 0 || *minCases <= 0 {
+		fmt.Fprintln(stderr, "eval: judge-calibration requires an agreed -min-kappa and -min-cases; do not invent thresholds")
+		return 2
+	}
+	declared := make([]string, 0, 4)
+	for _, value := range strings.Split(*values, ",") {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			declared = append(declared, trimmed)
+		}
+	}
+	records, err := eval.LoadJudgeLabels(*labelsPath)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	calibration, err := eval.CalibrateJudge(records, declared)
+	if err != nil {
+		return fail(stderr, err)
+	}
+
+	if *asJSON {
+		encoded, err := json.MarshalIndent(calibration, "", "  ")
+		if err != nil {
+			return fail(stderr, err)
+		}
+		fmt.Fprintln(stdout, string(encoded))
+	} else {
+		fmt.Fprintf(stdout, "judge calibration: cases=%d kappa=%.4f agreement=%.4f\n",
+			calibration.Cases, calibration.Kappa, calibration.Agreement)
+	}
+	failures := calibration.Meets(*minKappa, *minCases)
+	if len(failures) == 0 {
+		return 0
+	}
+	fmt.Fprintln(stderr, "eval: judge is not calibrated for release use:")
+	for _, failure := range failures {
+		fmt.Fprintln(stderr, "  - "+failure)
+	}
+	return 1
 }
 
 func loadGates(path string, report eval.Report) ([]eval.GateFailure, error) {
@@ -291,7 +389,11 @@ func gateExit(failures []eval.GateFailure, stderr io.Writer) int {
 }
 
 func fail(stderr io.Writer, err error) int {
-	fmt.Fprintln(stderr, "eval: "+err.Error())
+	message := err.Error()
+	if !strings.HasPrefix(message, "eval: ") {
+		message = "eval: " + message
+	}
+	fmt.Fprintln(stderr, message)
 	return 1
 }
 

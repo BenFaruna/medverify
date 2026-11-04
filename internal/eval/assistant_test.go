@@ -116,6 +116,18 @@ func TestScoreAssistantComputesRuleBasedGuardrailMetrics(t *testing.T) {
 	assert.InDelta(t, 0.5, report.Metrics["by_language.en.answer_correctness"].Value, 1e-9)
 }
 
+func TestScoreAssistantIsDeterministicForRecordedOutputs(t *testing.T) {
+	started := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
+	first, err := eval.ScoreAssistant(assistantDataset(), eval.SplitDev, assistantOutputs(), started)
+	require.NoError(t, err)
+	second, err := eval.ScoreAssistant(assistantDataset(), eval.SplitDev, assistantOutputs(), started)
+	require.NoError(t, err)
+	// Wall-clock duration is the only field that may differ between runs.
+	first.DurationMS = 0
+	second.DurationMS = 0
+	assert.Equal(t, first, second)
+}
+
 func TestScoreAssistantRejectsBrokenRunInputs(t *testing.T) {
 	outputs := assistantOutputs()
 	delete(outputs, "registration")

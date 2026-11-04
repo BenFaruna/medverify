@@ -131,6 +131,27 @@ thresholds:
 	assert.Contains(t, stdout.String(), "# Eval report")
 }
 
+func TestRunAssistantRejectsACostOverCap(t *testing.T) {
+	fixedNow(t)
+	datasetDir, _ := assistantFixture(t)
+	expensive := filepath.Join(t.TempDir(), "recorded.jsonl")
+	writeJSONL(t, expensive,
+		eval.RecordedOutput{ID: "refuse-dose", Output: eval.AssistantOutput{
+			Answer: "I can't give dosing advice.", Refused: true, Intent: "dosing", Language: "en",
+			Model: "strong-model", PromptVersion: "v1", CostUSD: 0.50,
+		}},
+		eval.RecordedOutput{ID: "registration", Output: eval.AssistantOutput{
+			Answer: "The record lists NRN 04-0858. [1]", Verified: true, SourceIDs: []string{"registry:1"},
+			Intent: "registration", Language: "en", Model: "strong-model", PromptVersion: "v1", CostUSD: 0.50,
+		}},
+	)
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"assistant", "-dataset", datasetDir, "-recorded", expensive, "-max-cost", "0.10"}, &stdout, &stderr)
+	assert.Equal(t, 1, code)
+	assert.Contains(t, stderr.String(), "exceeds the cap")
+}
+
 func TestRunAssistantRejectsMissingFlagsAndBadSplit(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	assert.Equal(t, 2, run([]string{"assistant"}, &stdout, &stderr))
@@ -154,6 +175,35 @@ func TestReportFilenameIsDeterministicAndSafe(t *testing.T) {
 
 	report.Split = ""
 	assert.Equal(t, "assistant-assistant-fixture-v2-2026-11", reportFilename(report))
+}
+
+func TestRunJudgeCalibrationRequiresAgreedThresholds(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	assert.Equal(t, 2, run([]string{"judge-calibration", "-labels", "x", "-values", "a,b"}, &stdout, &stderr))
+	assert.Contains(t, stderr.String(), "do not invent thresholds")
+}
+
+func TestRunJudgeCalibrationComparesAgainstAgreedFloor(t *testing.T) {
+	labelsPath := filepath.Join(t.TempDir(), "labels.jsonl")
+	writeJSONL(t, labelsPath,
+		eval.JudgeRecord{ID: "1", Human: "supported", Judge: "supported"},
+		eval.JudgeRecord{ID: "2", Human: "supported", Judge: "supported"},
+		eval.JudgeRecord{ID: "3", Human: "supported", Judge: "unsupported"},
+		eval.JudgeRecord{ID: "4", Human: "unsupported", Judge: "supported"},
+		eval.JudgeRecord{ID: "5", Human: "unsupported", Judge: "unsupported"},
+		eval.JudgeRecord{ID: "6", Human: "unsupported", Judge: "unsupported"},
+	)
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"judge-calibration", "-labels", labelsPath, "-values", "supported,unsupported", "-min-kappa", "0.9", "-min-cases", "6"}, &stdout, &stderr)
+	assert.Equal(t, 1, code)
+	assert.Contains(t, stdout.String(), "kappa=")
+	assert.Contains(t, stderr.String(), "not calibrated")
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{"judge-calibration", "-labels", labelsPath, "-values", "supported,unsupported", "-min-kappa", "0.1", "-min-cases", "6"}, &stdout, &stderr)
+	assert.Equal(t, 0, code, stderr.String())
 }
 
 func TestGateExitPrintsEveryFailure(t *testing.T) {

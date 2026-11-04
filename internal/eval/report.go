@@ -43,6 +43,7 @@ type Report struct {
 	CostUSD        float64           `json:"cost_usd,omitempty"`
 	Cases          int               `json:"cases"`
 	Metrics        map[string]Metric `json:"metrics"`
+	Confusion      *ConfusionTable   `json:"confusion,omitempty"`
 	Failures       []Failure         `json:"failures,omitempty"`
 }
 
@@ -174,6 +175,27 @@ func (r Report) Markdown() (string, error) {
 		b.WriteString("\n## Failures\n\n")
 		for _, failure := range r.Failures {
 			fmt.Fprintf(&b, "- `%s`: %s\n", failure.ID, failure.Reason)
+		}
+	}
+	if r.Confusion != nil {
+		b.WriteString("\n## Confusion\n\n| Expected \\ Got |")
+		for _, label := range r.Confusion.Labels {
+			fmt.Fprintf(&b, " %s |", label)
+		}
+		b.WriteString("\n| --- |")
+		for range r.Confusion.Labels {
+			b.WriteString(" ---: |")
+		}
+		b.WriteString("\n")
+		for row, label := range r.Confusion.Labels {
+			fmt.Fprintf(&b, "| %s |", label)
+			for _, count := range r.Confusion.Counts[row] {
+				fmt.Fprintf(&b, " %d |", count)
+			}
+			b.WriteString("\n")
+		}
+		if unknown := r.Confusion.Totals["(unknown)"]; unknown > 0 {
+			fmt.Fprintf(&b, "\n%d output(s) had a label outside the confusion set.\n", unknown)
 		}
 	}
 	return b.String(), nil
