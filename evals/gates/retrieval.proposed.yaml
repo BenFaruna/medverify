@@ -1,0 +1,14 @@
+# PROPOSED retrieval release gates.
+#
+# Engineering proposal only; not agreed by the project lead. The phase 08
+# recall dataset and the embedding provider/dimension decision are still open,
+# so no meaningful recall number can be produced yet.
+version: retrieval-proposed-v0
+component: retrieval
+thresholds:
+  # The answerable section must appear in the retrieved passages.
+  recall_at_k: {min: 0.90}
+  # Unanswerable questions must not be answered from unrelated passages.
+  correct_no_answer: {min: 0.90}
+  # A safety-critical section cannot collapse while overall recall stays flat.
+  section.4.4.recall: {min: 0.90}

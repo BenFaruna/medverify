@@ -6,6 +6,8 @@ COMPOSE ?= docker compose
 SQLC ?= sqlc
 ENV_FILE ?= .env
 BIN_DIR ?= bin
+# Extra arguments for the eval runner, e.g. ARGS="assistant -dataset ...".
+ARGS ?=
 
 # Tools pinned to the versions CI uses. Install with `make tools`.
 GOOSE_VERSION := v3.29.0
@@ -114,8 +116,16 @@ registry-report: ## Show ingestion counts, leaflet OCR needs, and recent runs
 	@set -a && . ./$(ENV_FILE) && set +a && $(GO) run ./cmd/admin registry report
 
 .PHONY: eval
-eval: ## Run the evaluation suite (phase 10)
-	$(GO) run ./cmd/eval
+eval: ## Run the evaluation runner (pass ARGS="assistant -dataset ... ...")
+	$(GO) run ./cmd/eval $(ARGS)
+
+.PHONY: eval-fixture
+eval-fixture: ## Score the synthetic assistant fixture offline (CI-safe)
+	$(GO) run ./cmd/eval assistant \
+		-dataset evals/fixtures/assistant-format \
+		-recorded evals/fixtures/assistant-format/recorded.jsonl \
+		-split dev \
+		-gates evals/gates/assistant.proposed.yaml
 
 .PHONY: tools
 tools: ## Install the CLI tools CI uses

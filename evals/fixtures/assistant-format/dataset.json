@@ -1,0 +1,8 @@
+{
+  "name": "assistant-format-fixture",
+  "version": "2026-11-fixture",
+  "component": "assistant",
+  "description": "SYNTHETIC FORMAT FIXTURE ONLY. Proves the runner and gate machinery; not a quality, safety, or calibration dataset.",
+  "created_by": "engineering fixture",
+  "created_at": "2026-11-04"
+}

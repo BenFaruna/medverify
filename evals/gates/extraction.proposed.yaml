@@ -1,0 +1,16 @@
+# PROPOSED extraction release gates.
+#
+# Engineering proposal only; not agreed by the project lead. The real set needs
+# consented photos and two-person labelling, neither of which exists yet. Do not
+# quote a fixture score as extraction quality.
+version: extraction-proposed-v0
+component: extraction
+thresholds:
+  # A fabricated NRN is the most dangerous extraction failure. One blocks.
+  fabricated_nrn: {max: 0}
+  # The NRN decides whether a record lookup is meaningful.
+  field.nrn.normalized: {min: 0.95}
+  # Names and dates are shown to users; keep the floor explicit even as the
+  # real dataset is still being collected.
+  field.product_name.normalized: {min: 0.90}
+  field.expiry_date.normalized: {min: 0.90}
