@@ -60,6 +60,8 @@ commands:
   retention sweep       delete expired scan images and conversations now
   scan delete <id> --confirm
                         erase one scan, its images, and its conversation
+  webhook list [limit]  show dead webhook deliveries
+  webhook replay <id>   queue a dead delivery for another attempt
   watchlist import <file.csv> [--dry-run]
                         validate and load reviewed watchlist entries
   watchlist list [--all] [--stale]
@@ -124,6 +126,8 @@ func run(args []string) error {
 		return retentionCommand(ctx, cfg, args[1:])
 	case "scan":
 		return scanCommand(ctx, cfg, args[1:])
+	case "webhook":
+		return webhookCommand(ctx, cfg, args[1:])
 	case "watchlist":
 		return watchlistCommand(ctx, cfg, args[1:])
 	case "verdict":

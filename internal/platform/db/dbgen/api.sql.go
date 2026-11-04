@@ -406,6 +406,62 @@ func (q *Queries) ListAllWebhookEndpoints(ctx context.Context) ([]WebhookEndpoin
 	return items, nil
 }
 
+const listDeadWebhookDeliveries = `-- name: ListDeadWebhookDeliveries :many
+SELECT
+  d.id, d.scan_id, d.event_type, d.attempts, d.last_status_code, d.last_error,
+  d.created_at, d.dead_at, e.url, c.name AS client_name
+FROM webhook_deliveries d
+JOIN webhook_endpoints e ON e.id = d.endpoint_id
+JOIN api_clients c ON c.id = d.client_id
+WHERE d.status = 'dead'
+ORDER BY d.dead_at DESC
+LIMIT $1
+`
+
+type ListDeadWebhookDeliveriesRow struct {
+	ID             uuid.UUID  `json:"id"`
+	ScanID         uuid.UUID  `json:"scan_id"`
+	EventType      string     `json:"event_type"`
+	Attempts       int32      `json:"attempts"`
+	LastStatusCode *int32     `json:"last_status_code"`
+	LastError      *string    `json:"last_error"`
+	CreatedAt      time.Time  `json:"created_at"`
+	DeadAt         *time.Time `json:"dead_at"`
+	Url            string     `json:"url"`
+	ClientName     string     `json:"client_name"`
+}
+
+func (q *Queries) ListDeadWebhookDeliveries(ctx context.Context, maxRows int32) ([]ListDeadWebhookDeliveriesRow, error) {
+	rows, err := q.db.Query(ctx, listDeadWebhookDeliveries, maxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDeadWebhookDeliveriesRow{}
+	for rows.Next() {
+		var i ListDeadWebhookDeliveriesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ScanID,
+			&i.EventType,
+			&i.Attempts,
+			&i.LastStatusCode,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.DeadAt,
+			&i.Url,
+			&i.ClientName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDueWebhookDeliveries = `-- name: ListDueWebhookDeliveries :many
 SELECT d.id, d.endpoint_id, d.client_id, d.scan_id, d.event_type, d.payload, d.status, d.attempts, d.next_attempt_at, d.last_status_code, d.last_error, d.created_at, d.delivered_at, d.dead_at, e.url, e.secret
 FROM webhook_deliveries d

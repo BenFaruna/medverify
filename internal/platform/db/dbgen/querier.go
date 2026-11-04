@@ -81,6 +81,7 @@ type Querier interface {
 	LatestSyncRun(ctx context.Context) (SyncRun, error)
 	ListAPIKeys(ctx context.Context) ([]ListAPIKeysRow, error)
 	ListAllWebhookEndpoints(ctx context.Context) ([]WebhookEndpoint, error)
+	ListDeadWebhookDeliveries(ctx context.Context, maxRows int32) ([]ListDeadWebhookDeliveriesRow, error)
 	// Documents that are readable and have not yet been indexed for this model and
 	// this exact file hash. Completed documents drop out, so a crashed backfill
 	// resumes without re-embedding everything.

@@ -113,3 +113,14 @@ UPDATE webhook_deliveries
 SET status = 'pending', next_attempt_at = now(), dead_at = NULL,
     delivered_at = NULL, last_error = NULL
 WHERE id = @id AND status = 'dead';
+
+-- name: ListDeadWebhookDeliveries :many
+SELECT
+  d.id, d.scan_id, d.event_type, d.attempts, d.last_status_code, d.last_error,
+  d.created_at, d.dead_at, e.url, c.name AS client_name
+FROM webhook_deliveries d
+JOIN webhook_endpoints e ON e.id = d.endpoint_id
+JOIN api_clients c ON c.id = d.client_id
+WHERE d.status = 'dead'
+ORDER BY d.dead_at DESC
+LIMIT @max_rows;

@@ -78,6 +78,43 @@ func (s *DBStore) Replay(ctx context.Context, id uuid.UUID) (bool, error) {
 	return affected > 0, nil
 }
 
+// DeadDelivery is one delivery that exhausted its retries. It names the
+// customer and URL so an operator can decide whether replay makes sense.
+type DeadDelivery struct {
+	ID             uuid.UUID
+	ScanID         uuid.UUID
+	EventType      string
+	Attempts       int32
+	LastStatusCode *int32
+	LastError      *string
+	ClientName     string
+	URL            string
+	DeadAt         *time.Time
+}
+
+// ListDead returns recent dead deliveries, newest first.
+func (s *DBStore) ListDead(ctx context.Context, limit int32) ([]DeadDelivery, error) {
+	rows, err := s.queries.ListDeadWebhookDeliveries(ctx, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list dead deliveries: %w", err)
+	}
+	items := make([]DeadDelivery, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, DeadDelivery{
+			ID:             row.ID,
+			ScanID:         row.ScanID,
+			EventType:      row.EventType,
+			Attempts:       row.Attempts,
+			LastStatusCode: row.LastStatusCode,
+			LastError:      row.LastError,
+			ClientName:     row.ClientName,
+			URL:            row.Url,
+			DeadAt:         row.DeadAt,
+		})
+	}
+	return items, nil
+}
+
 // ActiveEndpoints returns the endpoints a client has configured.
 func (s *DBStore) ActiveEndpoints(ctx context.Context, clientID int64) ([]dbgen.WebhookEndpoint, error) {
 	return s.queries.ListWebhookEndpoints(ctx, clientID)
