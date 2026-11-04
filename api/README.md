@@ -97,6 +97,30 @@ exist, so a response cannot be used to probe for IDs.
 Never log the key. Server logs record the client name and the key prefix, never
 the secret.
 
+### Issuing a key
+
+Keys are issued by an operator with the admin CLI, not through the public API.
+Creating a key is the only moment the full value exists outside the caller's
+hands; only its SHA-256 hash is stored.
+
+```bash
+medverify-admin apikey create --client acme \
+  --scopes scans:write,scans:read,questions:write
+```
+
+The command prints the key once. It can list prefixes and revoke a key later,
+but it can never show a key again:
+
+```bash
+medverify-admin apikey list
+medverify-admin apikey revoke mv_abc123
+```
+
+Pass `--sandbox` to make a test client, `--expires 720h` for a fixed lifetime,
+and `--rate`, `--daily-requests`, or `--daily-scans` to set the plan. Plan flags
+only apply when the client is first created, because limits belong to the
+client, not to each key.
+
 ## Errors
 
 Every error is an RFC 7807 problem document with a stable `code`.
@@ -238,9 +262,20 @@ score.
 
 ## Sandbox
 
-A sandbox key returns fixed responses for the documented test images and never
-calls a vision or language provider, so an integration can be built without
-cost. Sandbox results carry the same shape and the same disclaimer as live ones.
+A sandbox key returns a fixed result for any accepted upload and never calls a
+vision or language provider, so an integration can be built without cost. The
+result is always `needs_review` at `low` confidence with the
+`insufficient_label_data` reason and `sandbox: true`; it is a shape to build
+against, not a statement about the uploaded image. Sandbox results carry the
+same schema and the same disclaimer as live ones, and are labelled `sandbox` in
+the stored provider field.
+
+## Pagination
+
+`/v1` has no collection endpoint that returns an unbounded list, so no response
+is paginated yet. Any future list endpoint uses opaque cursors (`limit` plus
+`cursor`), never offsets, caps `limit`, and returns `next_cursor` only when more
+results exist. Cursors are opaque: do not parse or construct them.
 
 ## Versioning and deprecation
 

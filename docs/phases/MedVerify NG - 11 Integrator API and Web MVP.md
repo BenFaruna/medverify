@@ -8,26 +8,26 @@
 
 **API platform**
 
-- [ ] Tables: api\_clients, api\_keys, usage\_counters, webhook\_endpoints, webhook\_deliveries
-- [ ] API key issuance: random key shown once, stored only as a hash, prefix kept for identification
-- [ ] Scopes (for example scans:write, scans:read, questions:write) and per-client quotas
-- [ ] Rate limiting per key and per IP
-- [ ] Webhooks: scan.completed, with HMAC signature, timestamp, retries, dead-letter state
-- [ ] Final OpenAPI 3 document, validated in CI, with examples
-- [ ] Standard error model, pagination rules, versioning policy under /v1, deprecation policy
-- [ ] Sandbox mode with fixed responses and test keys
-- [ ] Developer docs: quickstart, auth, errors, webhooks, example in curl, Go, and JavaScript
+- [x] Tables: api\_clients, api\_keys, usage\_counters, webhook\_endpoints, webhook\_deliveries
+- [x] API key issuance: random key shown once, stored only as a hash, prefix kept for identification (admin CLI)
+- [x] Scopes (for example scans:write, scans:read, questions:write) and per-client quotas
+- [x] Rate limiting per key and per IP
+- [x] Webhooks: scan.completed, with HMAC signature, timestamp, retries, dead-letter state
+- [x] Final OpenAPI 3 document, validated in CI, with examples
+- [x] Standard error model, pagination rules, versioning policy under /v1, deprecation policy
+- [x] Sandbox mode with fixed responses and test keys
+- [x] Developer docs: quickstart, auth, errors, webhooks, example in curl, Go, and JavaScript
 
 **Web MVP**
 
-- [ ] Mobile-first web client calling only the public API
-- [ ] Capture or upload up to 4 photos with guidance (front, back, side with ingredients)
-- [ ] Client-side downscale before upload
-- [ ] Progress, result card (verdict, reasons, flags, sources), retake flow
-- [ ] Question panel with suggested questions and citations
-- [ ] Persistent disclaimer: this tool compares packs to NAFDAC records and is not medical advice
-- [ ] Language selector, starting with English and Pidgin
-- [ ] Accessibility and low-bandwidth support
+- [x] Mobile-first web client calling only the public API
+- [x] Capture or upload up to 4 photos with guidance (front, back, side with ingredients)
+- [x] Client-side downscale before upload
+- [x] Progress, result card (verdict, reasons, flags, sources), retake flow
+- [x] Question panel with suggested questions and citations
+- [x] Persistent disclaimer: this tool compares packs to NAFDAC records and is not medical advice
+- [x] Language selector, starting with English and Pidgin (Pidgin falls back to the reviewed English wording)
+- [ ] Accessibility and low-bandwidth support — markup, live regions, keyboard flow, and retry-safe uploads are implemented; axe, keyboard, and throttled-network runs are blocked on missing tooling and budget (see section 9)
 
 ## 2. Tools needed
 
@@ -113,3 +113,59 @@
 - Update openapi.yaml first, then implement, then run contract tests.
 - Every new endpoint needs: scope, rate limit class, tenant isolation test, error cases in the spec.
 - Do not add fields to public responses without checking the output rules (no score, no safe, no internal IDs).
+
+## 9. Implementation status and blockers
+
+The platform, contract, and web client are implemented and covered by unit,
+contract, and testcontainers integration tests. The end-to-end, accessibility,
+and load evidence is not.
+
+### What exists
+
+- `internal/platform/auth`: `mv_<prefix>_<secret>` key generation, SHA-256
+  hashing, prefix lookup with a constant-time compare, scopes, `DBStore`,
+  `SingleKeyStore` for dev, and `Principal.TenantKey()` so the raw key is never
+  stored on a scan.
+- `internal/platform/ratelimit` and `auth.DBUsageStore`: per-key and per-IP
+  token buckets, daily request/scan/question counters reserved in one
+  transaction, failing closed with `503` when the counter cannot be written.
+- `cmd/admin apikey create|list|revoke`: the full key is printed once and never
+  readable again; plan flags apply only when a client is first created.
+- `internal/scan`: `GetForTenant` returns `404` for another client's scan, the
+  public view drops the score and gains `disclaimer`, `sandbox`, and rendered
+  `reasons[].text`, and sandbox scans finish with a fixed needs-review result
+  without touching a provider.
+- `internal/webhook`: HMAC-SHA256 over `"<timestamp>.<body>"`, an SSRF guard
+  enforced at save and connect time, backoff with dead-lettering, and a worker
+  dispatcher.
+- `api/`: OpenAPI 3 document with scopes, `401`/`403`/`429`, rate-limit headers,
+  and examples; contract tests validate the document and real response bodies.
+- `web/`: three static files with no build step and no dependencies. The client
+  resizes to a 1568px long edge, uploads at most four photos, retries with the
+  same idempotency key, renders reasons and sourced flags, and asks suggested
+  questions. The key lives in memory only.
+
+### Verification run
+
+`go build ./...`, `go vet ./...`, `go test ./... -short`, the full
+`internal/scan` and `internal/platform/auth` integration suites (real Postgres
+via testcontainers), and `node --check web/assets/app.js`. The web client has
+not been exercised in a browser, and the API + Postgres + S3 + worker stack has
+not been run together.
+
+### Blockers kept open
+
+- No agreed CORS origin list, so production refuses to start without one and no
+  origin has been confirmed with the web hosting decision.
+- No agreed client plans: the defaults in migration 00010 are engineering
+  placeholders, not commercial limits.
+- No sandbox test-image contract from the product side. The implemented
+  behaviour is a fixed result for any accepted upload, not a fixture catalogue.
+- Webhook signing secrets are stored in plaintext because signing needs them.
+  Encryption at rest (envelope or KMS) is a phase 12 hardening item.
+- Playwright and axe-core are not available in this environment, so the web e2e,
+  refusal-template, throttled-network, and accessibility rows in section 5
+  cannot be run or claimed.
+- No load-test budget exists, so the p95 target row in section 5 cannot be run.
+- No live provider, Greenbook, or NAFDAC acceptance run was performed; CI
+  continues to use fakes and fixtures only.

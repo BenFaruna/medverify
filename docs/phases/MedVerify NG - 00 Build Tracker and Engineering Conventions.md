@@ -24,7 +24,7 @@ Update the Status column as work progresses (Not started, In progress, In review
 | 08 | Leaflet indexing (RAG) | 02 | 2 | In review |
 | 09 | Grounded Q and A assistant | 07, 08 | 3-4 | In review |
 | 10 | Evals and guardrails | starts with 04, runs to the end | ongoing | In review |
-| 11 | Integrator API and web MVP | 07, 09 | 3 | Not started |
+| 11 | Integrator API and web MVP | 07, 09 | 3 | In review |
 | 12 | Hardening and pilot readiness | all | 2-3 | Not started |
 
 Phases 02 and 03 can run in parallel after 01. Phase 08 can run in parallel with 04 to 07.
@@ -145,3 +145,8 @@ A task is done only when all of these are true:
 | Eval gate thresholds and who may approve an exception | Project lead | 10 |
 | Judge model, judge prompt, kappa floor, and minimum calibration sample | Project lead and engineering | 10 |
 | Ownership and consent process for extraction photos and assistant question corpora | Project lead and legal | 10 |
+| CORS origin allowlist, tied to the web client hosting decision | Tech lead | 11 |
+| Client plans: rate limits, daily request/scan quotas, and pricing per plan | Project lead | 11 |
+| Sandbox contract: whether fixed responses stay image-independent or need documented test images | Project lead | 11 |
+| Webhook signing secret encryption at rest (envelope or KMS), since signing needs the plaintext | Tech lead and security | 12 |
+| Browser e2e/accessibility tooling (Playwright, axe-core) and the load-test budget with a p95 target | Tech lead | 11 |
