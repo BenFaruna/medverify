@@ -8,8 +8,8 @@
 
 **Privacy and legal**
 
-- [ ] Data inventory: every kind of data stored, where, why, and for how long
-- [ ] Retention jobs: images, questions, and logs deleted on schedule, with an exception path for flagged cases
+- [x] Data inventory: every kind of data stored, where, why, and for how long (see [data-inventory.md](../data-inventory.md))
+- [ ] Retention jobs: images, questions, and logs deleted on schedule, with an exception path for flagged cases — image and conversation retention implemented and tested; container/platform log retention is not controlled by this application and remains open
 - [ ] Consent and privacy notice shown in the web client and described in the API terms
 - [ ] Data protection review under Nigeria's data protection law, including any cross-border transfer of images and questions to model providers. Obtain qualified legal advice. Record the decisions
 - [ ] Data processing agreements with each provider, and a written position on whether providers may retain or train on submitted data
@@ -18,17 +18,17 @@
 
 **Security**
 
-- [ ] Threat model (what an attacker, a counterfeiter, or an abusive integrator could do)
-- [ ] Dependency and container scanning in CI, secrets in a secret manager, key rotation procedure
+- [x] Threat model (what an attacker, a counterfeiter, or an abusive integrator could do) — first version written, not independently reviewed (see [threat-model.md](../threat-model.md))
+- [ ] Dependency and container scanning in CI, secrets in a secret manager, key rotation procedure — govulncheck and gitleaks run in CI, and rotation is documented in the runbook; a secret manager and container scanning are missing
 - [ ] Abuse tests of the scan endpoint (probing, replay, resource exhaustion)
 - [ ] Independent security test or a structured internal penetration test
 
 **Reliability and operations**
 
-- [ ] Metrics, traces, dashboards, and alerts (see section 4)
-- [ ] Degraded modes for provider outages
+- [ ] Metrics, traces, dashboards, and alerts (see section 4) — `/metrics` exposes aggregate HTTP counters and durations; no tracing, dashboards, scrapers, or alert routing
+- [ ] Degraded modes for provider outages — retry/fallback and feature switches exist, but the outage drill has not been run
 - [ ] Backups with a tested restore, and a rollback procedure for deploys and migrations
-- [ ] Runbooks and an incident process
+- [x] Runbooks and an incident process — draft runbook written (see [ops/runbook.md](../../ops/runbook.md)); no on-call rota or named incident owner
 - [ ] Cost dashboard and spending alerts
 
 **Pilot**
@@ -148,3 +148,58 @@ Hotspot mapping from the original proposal is out of scope for this build. If ad
 - Do not weaken retention, redaction, or isolation tests to meet a deadline.
 - Treat every drill as code: scripts under /ops, reviewed and repeatable, with the results written into this document.
 - If you find sensitive data in logs or traces, stop and report it immediately.
+
+## 12. Implementation status and blockers
+
+Phase 12 is code-in-progress, not a pilot sign-off. The parts that can be built
+without an external decision are in; the legal, operational, and independent
+review parts are not.
+
+### What exists
+
+- `internal/retention`: a scheduled sweep that deletes scan images after the
+  ordinary window, keeps flagged cases longer, deletes expired conversations,
+  and never deletes a row whose object delete failed. Erasure removes images
+  first and then the scan, so a failed delete leaves a retryable state.
+- `cmd/admin retention sweep` and `cmd/admin scan delete <id> --confirm` for
+  manual runs and data-subject requests.
+- `internal/platform/metrics` and `GET /metrics`: aggregate HTTP counters and
+  durations labelled by route pattern, never by concrete path.
+- Config kill switches: whole API, scan submission, assistant, Greenbook, and
+  the retention schedule.
+- `cmd/admin webhook list|replay` so dead deliveries are reachable and can be
+  requeued deliberately.
+- `docs/data-inventory.md`, `docs/threat-model.md`, and `ops/runbook.md`.
+- Provider choice is no longer binary: `claude` and the OpenAI-compatible
+  `openai` wire format are selectable independently for vision and assistant.
+
+### Verification run
+
+`go build ./...`, `go vet ./...`, `golangci-lint run ./...`, `go test ./... -short`,
+testcontainers integration tests for `internal/retention`, `internal/webhook`,
+`internal/platform/auth`, and `internal/scan`, and the API tests for metrics and
+kill switches. No load, soak, abuse, backup, restore, or log-leakage run has been
+performed.
+
+### Blockers that block a pilot
+
+- Legal and pharmacist review of verdict, flag, refusal, and disclaimer wording.
+- Data-protection review and provider data-processing terms, including
+  cross-border transfer of images and questions.
+- An independent security test or structured penetration test.
+- A signed accuracy-trial protocol and lab ground truth.
+- Named owners for security, data protection, on-call, watchlist, and pilot
+  partners.
+- Backup, restore, and migration-rollback drills on production-size data.
+- Dashboards, alert routing, and a spending alert with an agreed budget.
+
+### Blockers that do not block continued development
+
+- Webhook signing-secret encryption at rest (plaintext today; needed before
+  external customers, not before local testing).
+- Container scanning and a secret manager.
+- Log retention owned by the hosting platform.
+- A load-test budget and p95 target.
+- Whether ordinary, unflagged verdict records should expire.
+- The embedding provider/dimension decision, which also leaves RAG eval recall
+  unmeasurable.

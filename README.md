@@ -144,6 +144,17 @@ make down              # stop; `make clean` also deletes volumes
 Run the binaries on the host instead of in Compose with `go run ./cmd/api` and
 `go run ./cmd/worker`; `.env` already points at the published ports.
 
+## Operations
+
+Health checks, kill switches, retention and erasure commands, API-key rotation,
+webhook replay, and the incident process are in [ops/runbook.md](ops/runbook.md).
+What data is stored and for how long is in
+[docs/data-inventory.md](docs/data-inventory.md); known attack paths are in
+[docs/threat-model.md](docs/threat-model.md).
+
+`GET /metrics` serves Prometheus text with aggregate request counters and
+durations labelled by route pattern.
+
 ## Layout
 
 ```

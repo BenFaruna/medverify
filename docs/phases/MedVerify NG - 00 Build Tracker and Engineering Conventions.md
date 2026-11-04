@@ -25,7 +25,7 @@ Update the Status column as work progresses (Not started, In progress, In review
 | 09 | Grounded Q and A assistant | 07, 08 | 3-4 | In review |
 | 10 | Evals and guardrails | starts with 04, runs to the end | ongoing | In review |
 | 11 | Integrator API and web MVP | 07, 09 | 3 | In review |
-| 12 | Hardening and pilot readiness | all | 2-3 | Not started |
+| 12 | Hardening and pilot readiness | all | 2-3 | In review |
 
 Phases 02 and 03 can run in parallel after 01. Phase 08 can run in parallel with 04 to 07.
 
@@ -150,3 +150,7 @@ A task is done only when all of these are true:
 | Sandbox contract: whether fixed responses stay image-independent or need documented test images | Project lead | 11 |
 | Webhook signing secret encryption at rest (envelope or KMS), since signing needs the plaintext | Tech lead and security | 12 |
 | Browser e2e/accessibility tooling (Playwright, axe-core) and the load-test budget with a p95 target | Tech lead | 11 |
+| Named owners: security, data protection, on-call, watchlist, pilot partners | Project lead | 12 |
+| Provider data-processing terms and cross-border transfer position | Project lead and legal | 12 |
+| Backup, restore, and migration-rollback drill schedule | Tech lead | 12 |
+| Whether ordinary unflagged verdict records expire | Project lead and pharmacist | 12 |
