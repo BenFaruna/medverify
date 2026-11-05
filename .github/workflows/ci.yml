@@ -13,6 +13,8 @@ env:
   # Keep in sync with go.mod and the Dockerfile.
   GO_VERSION: "1.26.x"
   GOLANGCI_LINT_VERSION: "v2.6.2"
+  # Pinned so a new gitleaks release cannot change scan results on its own.
+  GITLEAKS_VERSION: "v8.30.1"
 
 jobs:
   build:
@@ -71,6 +73,8 @@ jobs:
   integration:
     name: Integration tests
     runs-on: ubuntu-latest
+    # Generous but finite: a wedged container start must not hold a runner for hours.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -83,7 +87,24 @@ jobs:
         run: |
           docker pull pgvector/pgvector:pg16
           docker pull chrislusf/seaweedfs:latest
-      - run: go test -race -tags=integration ./...
+          docker pull testcontainers/ryuk:0.14.0
+      - name: Integration tests
+        shell: bash
+        run: |
+          set -o pipefail
+          # Each package starts its own Postgres, S3 store and reaper, so running
+          # every package at once starves container startup on a 4-vCPU runner.
+          # The 10m default timeout is per package and too tight under -race;
+          # keep the log so a timeout shows which test was in flight.
+          go test -race -tags=integration -count=1 -timeout 20m -p 2 -v ./... 2>&1 \
+            | tee integration-tests.log
+      - name: Upload integration test log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-log
+          path: integration-tests.log
+          retention-days: 7
 
   vulnerability-scan:
     name: govulncheck
@@ -110,5 +131,7 @@ jobs:
           cache: true
       - name: gitleaks
         run: |
-          go install github.com/zricethezav/gitleaks/v8@latest
-          gitleaks detect --source . --no-banner --redact
+          go install github.com/zricethezav/gitleaks/v8@${GITLEAKS_VERSION}
+          # Test fixtures and documented placeholder keys are allowlisted in
+          # .gitleaks.toml; everything else must be clean.
+          gitleaks detect --source . --config .gitleaks.toml --no-banner --redact --exit-code 1

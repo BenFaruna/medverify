@@ -1,0 +1,39 @@
+# Gitleaks configuration.
+#
+# CI scans the whole git history, so every historical commit is matched against
+# these rules. The allowlists below only cover values that are synthetic by
+# construction; anything that looks like a real credential still fails the scan.
+
+title = "MedVerify gitleaks config"
+
+[extend]
+# Keep the upstream default rule set (and its global allowlists).
+useDefault = true
+
+# Go test fixtures fabricate API keys, idempotency keys and passwords from
+# obviously fake literals (mv_test_<32 hex>, idem-<digits>,
+# medverify-test-secret). They authenticate against nothing: the stores under
+# test are in-memory fakes or throwaway testcontainers. Suppressing findings
+# here does not skip any test execution.
+[[allowlists]]
+description = "Synthetic credentials in Go test fixtures"
+paths = [
+  '''(?:^|/)[^/]*_test\.go$''',
+]
+
+# Tests and docs also spell out the reserved fixture key prefix directly.
+[[allowlists]]
+description = "Reserved synthetic MedVerify key prefix"
+regexes = [
+  '''mv_test_[0-9a-f]{32}''',
+]
+
+# README curl examples use the development-only legacy key. It is not a
+# credential: the API accepts it only when API_LEGACY_KEY is set locally
+# (see README "Troubleshooting"), and the values below are never issued to
+# clients.
+[[allowlists]]
+description = "Development-only placeholder key in documentation examples"
+regexes = [
+  '''dev-api-key''',
+]

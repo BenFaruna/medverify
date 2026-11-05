@@ -4,6 +4,7 @@ package migrations_test
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -40,7 +41,13 @@ func TestMigrationsStatusReportsApplied(t *testing.T) {
 
 	statuses, err := migrations.Status(ctx, databaseURL)
 	require.NoError(t, err)
-	require.Len(t, statuses, 8)
+
+	// Derive the expected count from the embedded migration files so adding a
+	// migration does not silently rot this assertion.
+	files, err := filepath.Glob("*.sql")
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+	require.Len(t, statuses, len(files))
 	for i, status := range statuses {
 		assert.Equal(t, "applied", string(status.State))
 		assert.Equal(t, int64(i+1), status.Source.Version)
