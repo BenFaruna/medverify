@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	medapi "github.com/benfaruna/medverify/api"
 	"github.com/benfaruna/medverify/internal/platform/auth"
 	"github.com/benfaruna/medverify/internal/platform/httpx"
 	"github.com/benfaruna/medverify/internal/platform/metrics"
@@ -124,6 +125,58 @@ func TestReadyzTimesOutSlowDependency(t *testing.T) {
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 
 	assert.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+}
+
+func TestDocsAreMountedWithoutAuthentication(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(Options{
+		Docs: medapi.DocsHandler(),
+		Scan: &scan.HTTPHandler{},
+	})
+
+	for _, test := range []struct {
+		path   string
+		status int
+		body   string
+	}{
+		{path: "/docs", status: http.StatusMovedPermanently},
+		{path: "/docs/", status: http.StatusOK, body: "SwaggerUIBundle"},
+		{path: "/openapi.yaml", status: http.StatusOK, body: "openapi: 3."},
+	} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, test.path, nil))
+
+		assert.Equal(t, test.status, recorder.Code, test.path)
+		if test.body != "" {
+			assert.Contains(t, recorder.Body.String(), test.body, test.path)
+		}
+	}
+
+	// Documentation is public, but the versioned API is still gated.
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/scans/00000000-0000-0000-0000-000000000000", nil))
+	assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+}
+
+func TestDocsAreNotShadowedByTheWebClient(t *testing.T) {
+	t.Parallel()
+
+	web := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("web client"))
+	})
+	handler := NewHandler(Options{Docs: medapi.DocsHandler(), Web: web})
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/docs/", nil))
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "SwaggerUIBundle")
+
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, "web client", recorder.Body.String())
 }
 
 func TestUnknownRouteReturnsProblem(t *testing.T) {

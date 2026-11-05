@@ -15,6 +15,7 @@ import (
 	"strings"
 	"syscall"
 
+	medapi "github.com/benfaruna/medverify/api"
 	"github.com/benfaruna/medverify/internal/assistant"
 	"github.com/benfaruna/medverify/internal/llm"
 	"github.com/benfaruna/medverify/internal/platform/auth"
@@ -114,6 +115,7 @@ func run() error {
 	handler := NewHandler(Options{
 		Logger: logger,
 		Web:    web,
+		Docs:   medapi.DocsHandler(),
 		Dependencies: []Dependency{
 			{Name: "database", Check: func(ctx context.Context) error { return db.Ping(ctx, pool) }},
 			{Name: "storage", Check: store.Ping},

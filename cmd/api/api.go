@@ -49,7 +49,10 @@ type Options struct {
 	// CORSOrigins allowlists browser origins. Empty disables CORS headers.
 	CORSOrigins []string
 	// Web serves the static MVP client at /. Nil disables it.
-	Web       http.Handler
+	Web http.Handler
+	// Docs serves the interactive API documentation at /docs and the OpenAPI
+	// document at /openapi.yaml. Nil disables both.
+	Docs      http.Handler
 	APIKey    string
 	Scan      *scan.HTTPHandler
 	Assistant *assistant.HTTPHandler
@@ -97,6 +100,15 @@ func NewHandler(opts Options) http.Handler {
 
 	router.Get("/healthz", healthz)
 	router.Get("/readyz", readyz(logger, opts.Dependencies, opts.ReadyTimeout))
+
+	// The docs handler owns /docs, /docs/*, and /openapi.yaml. Register the
+	// exact prefix and wildcard rather than mounting at /, because the static
+	// web client also mounts at / and the more specific routes must win.
+	if opts.Docs != nil {
+		router.Handle("/docs", opts.Docs)
+		router.Handle("/docs/*", opts.Docs)
+		router.Handle("/openapi.yaml", opts.Docs)
+	}
 
 	// The MVP client is static and talks only to the public API. It is mounted
 	// after the probes so it can never shadow them.

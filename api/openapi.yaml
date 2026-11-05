@@ -16,7 +16,12 @@ info:
 
     The API never declares a medicine safe, genuine, or authentic, never
     describes one as fake, and never returns a numeric score.
+
+    Interactive documentation is served at `/docs`; this document is available
+    at `/openapi.yaml`. Both are unauthenticated and expose no scan data.
 servers:
+  - url: /
+    description: The server that served this document
   - url: http://localhost:8080
     description: Local docker compose stack
 tags:

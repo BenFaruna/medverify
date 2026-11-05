@@ -7,19 +7,52 @@ statement about our data, not about the pack.
 
 - Machine contract: [`openapi.yaml`](openapi.yaml). CI validates it and runs
   contract tests against real responses.
-- Interactive docs: serve the file with any OpenAPI viewer; nothing else is
-  needed.
+- Interactive docs: the API serves Swagger UI at `/docs`; the raw document is
+  at `/openapi.yaml`. Both are embedded in the binary and need no CDN, Node
+  build, or extra service.
 
 ## Contents
 
-1. [Quickstart](#quickstart)
-2. [Authentication and scopes](#authentication-and-scopes)
-3. [Errors](#errors)
-4. [Rate limits and quotas](#rate-limits-and-quotas)
-5. [Endpoints](#endpoints)
-6. [Webhooks](#webhooks)
-7. [Sandbox](#sandbox)
-8. [Versioning and deprecation](#versioning-and-deprecation)
+1. [Interactive documentation](#interactive-documentation)
+2. [Quickstart](#quickstart)
+3. [Authentication and scopes](#authentication-and-scopes)
+4. [Errors](#errors)
+5. [Rate limits and quotas](#rate-limits-and-quotas)
+6. [Endpoints](#endpoints)
+7. [Webhooks](#webhooks)
+8. [Sandbox](#sandbox)
+9. [Versioning and deprecation](#versioning-and-deprecation)
+
+## Interactive documentation
+
+Start the stack, then open:
+
+- <http://localhost:8080/docs> — Swagger UI with every documented endpoint,
+  request body, response schema, and error model.
+- <http://localhost:8080/openapi.yaml> — the raw OpenAPI 3.1 contract.
+
+```bash
+make run
+open http://localhost:8080/docs        # macOS
+xdg-open http://localhost:8080/docs    # Linux
+```
+
+Use **Authorize** in Swagger UI to paste an API key, then use **Try it out** on
+any endpoint. The key is kept in memory only and is not written to browser
+storage; re-enter it after a reload. The docs page is same-origin, so the
+relative server entry in the spec makes requests against whichever host served
+the page. File uploads (`POST /v1/scans`) work through the generated multipart
+form.
+
+Both routes are public: they expose the contract, not scan data. Every `/v1`
+route still requires a key and its documented scope even when called from the
+docs page. The documentation routes are mounted by `cmd/api` before the static
+web client and are not affected by the API kill switch.
+
+The UI assets are vendored under [`swaggerui/`](swaggerui) (Apache-2.0,
+Swagger UI 5.33.0) so local development and air-gapped deployments work without
+a CDN. The raw spec and UI are embedded with `go:embed`, so a binary built from
+a clean checkout serves them directly.
 
 ## Quickstart
 
