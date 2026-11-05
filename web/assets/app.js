@@ -403,6 +403,23 @@ function renderReasons(reasons, container) {
   }
 }
 
+// Dates arrive as parsed objects, not strings, so they need formatting before
+// they reach the page. Month-only labels must not gain a made-up day.
+function formatFieldValue(value) {
+  if (value && typeof value === "object") {
+    if (typeof value.year === "number" && typeof value.month === "number") {
+      const year = value.year;
+      const month = String(value.month).padStart(2, "0");
+      if (value.precision === "day" && typeof value.day === "number") {
+        return `${year}-${month}-${String(value.day).padStart(2, "0")}`;
+      }
+      return `${year}-${month}`;
+    }
+    if (typeof value.raw === "string" && value.raw) return value.raw;
+  }
+  return String(value);
+}
+
 function renderExtracted(extracted, container) {
   if (!extracted) return;
 
@@ -414,7 +431,7 @@ function renderExtracted(extracted, container) {
       typeof field.confidence === "number"
         ? ` (${Math.round(field.confidence * 100)}%)`
         : "";
-    rows.push([t(labelKey), `${field.value}${confidence}`]);
+    rows.push([t(labelKey), `${formatFieldValue(field.value)}${confidence}`]);
   }
   if (rows.length === 0) return;
 
