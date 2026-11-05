@@ -62,7 +62,7 @@
 
 **Versioning.** Additive changes only within /v1. Breaking changes need /v2 and a deprecation window.
 
-**Web client.** Use a plain file input with the camera capture attribute so phones open the camera. Resize to a modest long edge and compress before upload to suit poor connections. Retry uploads with the same Idempotency-Key. Poll with backoff when the server returns 202. Keep the JavaScript bundle small and avoid heavy dependencies.
+**Web client.** Use one plain file input without the capture attribute, so phones offer the camera and the photo library in the same picker and desktops open the file browser. Resize to a modest long edge and compress before upload to suit poor connections. Retry uploads with the same Idempotency-Key. Poll with backoff when the server returns 202. Keep the JavaScript bundle small and avoid heavy dependencies.
 
 ## 5. Tests for this phase
 
