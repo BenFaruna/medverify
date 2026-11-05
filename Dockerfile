@@ -26,6 +26,8 @@ RUN apk add --no-cache ca-certificates wget \
 
 WORKDIR /app
 COPY --from=build /out/ /app/
+# WEB_DIR defaults to "web"; without these files the API refuses to start.
+COPY --chown=medverify:medverify --from=build /src/web /app/web
 
 USER medverify
 EXPOSE 8080
