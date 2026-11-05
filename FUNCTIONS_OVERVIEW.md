@@ -322,9 +322,9 @@ exists yet, so recall has not been measured.
   - `redirect` for off-topic,
   - `fallback` for unknown.
 - Refusals, redirects, and fallbacks come from reviewed templates embedded in
-  the binary. They are validated at startup; production startup fails until the
-  template file is marked reviewed. Today only English exists and the file is
-  marked unreviewed, so this remains a blocker.
+  the binary. They are validated at startup; production startup fails if a
+  configured language's template file is not marked reviewed. English and
+  Pidgin are reviewed and enabled; Hausa, Yoruba, and Igbo remain.
 
 ### 4.4 Assistant: tools and orchestration
 
@@ -524,7 +524,7 @@ verdict ground truth.
   restore, and migration-rollback drills.
 - Add browser end-to-end, accessibility, and throttled-network tests for the
   web client.
-- Expand templates and review for Pidgin, Hausa, Yoruba, and Igbo.
+- Expand templates and review for Hausa, Yoruba, and Igbo.
 
 ### Longer term
 

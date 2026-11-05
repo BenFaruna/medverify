@@ -10,7 +10,7 @@
 - [x] Tables: conversations, messages, tool\_calls (all tied to a scan)
 - [x] Intent router (small model, JSON output)
 - [x] Policy gate in plain Go, driven by a policy table
-- [ ] Refusal and fallback templates per language, human-reviewed (draft `en` only, deliberately `reviewed: false`)
+- [x] Refusal and fallback templates per language, human-reviewed (`en` and `pcm` reviewed and enabled)
 - [x] Tools: get\_registration, get\_ingredients, get\_safety\_flags, search\_leaflet (all session-pinned)
 - [x] Orchestrator loop with step, time, and token limits
 - [x] Verifier: rule checks plus a second-pass support check
@@ -191,10 +191,9 @@ type Tool interface {
 
 ### Open blockers for this phase
 
-1. **Templates are not reviewed.** Only English templates exist and the file is
-   marked `reviewed: false`. Production startup fails by design until a
-   pharmacist and legal reviewer sign off. Native-speaker review for Pidgin,
-   Hausa, Yoruba, and Igbo has not happened.
+1. **Template review is complete for English and Pidgin.** Both catalogs are
+   marked `reviewed: true`. Native-speaker review for Hausa, Yoruba, and Igbo
+   has not happened, so those languages are not enabled.
 2. **Policy sign-off is not recorded.** The policy table matches the phase
    document, but no pharmacist/project-lead sign-off is on file.
 3. **Dosing relay decision is open.** The default is refuse and link to the

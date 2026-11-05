@@ -26,7 +26,7 @@
 - [x] Progress, result card (verdict, reasons, flags, sources), retake flow
 - [x] Question panel with suggested questions and citations
 - [x] Persistent disclaimer: this tool compares packs to NAFDAC records and is not medical advice
-- [x] Language selector, starting with English and Pidgin (Pidgin falls back to the reviewed English wording)
+- [x] Language selector, starting with English and Pidgin (both reviewed and enabled)
 - [ ] Accessibility and low-bandwidth support — markup, live regions, keyboard flow, and retry-safe uploads are implemented; axe, keyboard, and throttled-network runs are blocked on missing tooling and budget (see section 9)
 
 ## 2. Tools needed
