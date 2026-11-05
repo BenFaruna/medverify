@@ -1,17 +1,6 @@
 version: wording-v1
 language: en
 
-# User-facing flag wording. This file is the only place flag sentences live;
-# code emits stable reason codes and never builds text.
-#
-# STATUS: draft. The phase 06 checklist requires a pharmacist to review and
-# approve every template before release. Until that review is recorded, treat
-# these sentences as provisional. Do not add a template containing a claim about
-# safety, authenticity, or harm; a flag only reports a match against a cited
-# source or a difference from the registered record.
-#
-# Placeholders in braces are filled from Flag.Evidence. Every placeholder must
-# be present in the evidence for that reason code.
 templates:
   watchlist_alert: "This product appears in a {issuing_body} alert dated {issued_at}. Source: {source_url}"
   watchlist_withdrawal: "This product appears in a {issuing_body} withdrawal notice dated {issued_at}. Source: {source_url}"

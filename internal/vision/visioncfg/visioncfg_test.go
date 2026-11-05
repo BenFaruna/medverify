@@ -18,7 +18,6 @@ func TestNewSelectsEachProvider(t *testing.T) {
 	assert.IsType(t, &vision.Fake{}, fake)
 
 	for _, provider := range []string{"claude", "openai"} {
-		provider := provider
 		t.Run(provider, func(t *testing.T) {
 			t.Parallel()
 			built, err := New(config.Vision{

@@ -24,3 +24,7 @@
 # Eval reports are local artifacts; keep the directory notes in git.
 /evals/reports/*
 !/evals/reports/README.md
+MedVerify NG — Functions Overview.pdf
+.gitignore
+MedVerify NG.pptx
+MedVerify NG.pdf
