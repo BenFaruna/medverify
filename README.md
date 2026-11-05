@@ -9,6 +9,155 @@ The system never says a medicine is safe, genuine, or authentic. See
 [docs/scoring-philosophy.md](docs/scoring-philosophy.md) and the product rules in
 [the build tracker](docs/phases/MedVerify%20NG%20-%2000%20Build%20Tracker%20and%20Engineering%20Conventions.md).
 
+For the problem statement, architecture, AI components, design decisions, and
+known gaps, see the [functions overview](FUNCTIONS_OVERVIEW.md).
+
+## Getting Started
+
+MedVerify runs as four pieces: an HTTP API that also serves the web client, a
+background worker, Postgres with pgvector, and S3-compatible object storage.
+Docker Compose starts all of them with one command. The default configuration
+uses deterministic fake model providers, so the stack works offline with no
+accounts, API keys, or NAFDAC network access.
+
+### What you need
+
+| Dependency | Used for | Check |
+| --- | --- | --- |
+| Go 1.26 or newer | Building and running the binaries | `go version`; the version is pinned in `go.mod` |
+| Docker Engine 24+ with Compose v2 | Postgres, object storage, and the services | `docker compose version` |
+| `make` and `curl` | Starting the stack and checking readiness | `make --version` |
+| Free ports 8080, 5432, and 9000 | API and web client, Postgres, S3 gateway | change `HTTP_PORT`, `POSTGRES_PORT`, or `STORAGE_PORT` in `.env` if they are taken |
+
+Do not install Postgres, pgvector, or an S3 server yourself: the Compose stack
+provides them. The web client is plain HTML, CSS, and JavaScript with no build
+step, so Node.js is not required. A vision or assistant provider key is
+optional; only real extraction and generated answers need one.
+
+### 1. Clone and configure
+
+```bash
+git clone https://github.com/benfaruna/medverify.git
+cd medverify
+cp .env.example .env
+```
+
+The copied defaults are enough for local work. `.env` is git-ignored; never
+commit it or put a real provider key in a tracked file. `API_LEGACY_KEY=dev-api-key`
+is a development-only shared key the bundled web page sends; keys issued with
+`admin apikey create` work at the same time. `VISION_PROVIDER=fake` returns a
+deterministic reading instead of calling a model.
+
+### 2. Start the stack
+
+```bash
+make run
+```
+
+This builds the images, applies migrations, creates the storage bucket, starts
+the API and worker, and waits until `GET /readyz` answers. The first run pulls
+images and compiles the binaries, so allow a few minutes; later runs are quick.
+Follow service output with `make logs`.
+
+### 3. Verify and open the app
+
+```bash
+curl localhost:8080/healthz
+curl localhost:8080/readyz
+```
+
+Then open <http://localhost:8080> in a browser. The API serves the web client
+from `web/` at the root; the page shrinks each photo in the browser, uploads
+one batch, and renders the verdict with reasons, flags, sources, and follow-up
+questions. Set `WEB_DIR=` to disable serving the page when it is hosted
+elsewhere.
+
+`/healthz` proves the process is alive. `/readyz` proves it can reach Postgres
+and object storage, so only the second means the stack can take a scan.
+
+Interactive API documentation is at <http://localhost:8080/docs> (Swagger UI),
+and the raw OpenAPI contract is at <http://localhost:8080/openapi.yaml>. Both
+are served by the API binary and need no extra tooling, but the endpoints still
+require an API key. See the
+[API guide](api/README.md#interactive-documentation) for how to authorize and
+try a request.
+
+### 4. Try a scan through the API
+
+Upload a pack photo (the default vision provider is a deterministic fake; set
+`VISION_PROVIDER=claude` or `openai` with a key and pinned model for a real
+extraction):
+
+```bash
+curl -i -X POST localhost:8080/v1/scans \
+  -H "X-API-Key: dev-api-key" \
+  -H "Idempotency-Key: demo-1" \
+  -F "images=@testdata/images/normal.jpg" \
+  -F "latitude=6.45" -F "longitude=3.39" -F "language=en"
+# 201 with status=completed, or 202 with a Location header; then:
+curl -H "X-API-Key: dev-api-key" localhost:8080/v1/scans/<id>
+```
+
+A result never says a medicine is safe, genuine, or authentic. `unreadable`
+means the photo could not be read confidently, not that the product is fake.
+
+### What is running
+
+| Service | Address | Role |
+| --- | --- | --- |
+| `api` | <http://localhost:8080> | Public API, `/healthz`, `/readyz`, `/metrics`, `/docs`, and the web client |
+| `worker` | no port | River jobs: extraction, verification, verdict, indexing, retention |
+| `postgres` | localhost:5432 | Primary database with the `pgvector` extension |
+| `storage` | localhost:9000 | SeaweedFS S3 gateway for private image storage |
+| `init` | exits after setup | One-shot migrations and bucket creation |
+
+### Run the binaries on the host instead
+
+```bash
+docker compose up -d postgres storage
+make migrate-up
+make storage-init
+go run ./cmd/api      # in one terminal
+go run ./cmd/worker   # in another
+```
+
+`.env` already points at the published ports (localhost:5432 and
+localhost:9000), so the host processes and the containers agree.
+
+### Common commands
+
+```bash
+make test              # unit tests, race detector on
+make test-integration  # testcontainers: pgvector Postgres and S3 storage per package
+make lint              # golangci-lint
+make migrate-status    # against the database in .env
+make job-noop          # enqueue a no-op job; the worker logs it
+make sync-greenbook    # run a full Greenbook product sync now
+make sync-leaflets     # download and extract pending leaflets
+make registry-report   # counts, OCR needs, unknown ingredients, recent runs
+make logs              # follow service logs
+make down              # stop; `make clean` also deletes volumes
+```
+
+`make tools` installs the CLI tools CI pins: goose, sqlc, golangci-lint, and
+govulncheck.
+
+### Troubleshooting
+
+| Symptom | Fix |
+| --- | --- |
+| `make run` ends with "stack did not become ready" | Run `make logs`. Usually a port is already in use, Docker is not running, or the `init` container failed a migration. |
+| `401 unauthorized` from the API | Send `X-API-Key: dev-api-key` (the development-only `API_LEGACY_KEY`), or a key issued with `admin apikey create`. Both are accepted. |
+| The `api` container exits mentioning `serve web client` | `WEB_DIR` points at a missing directory. Keep the default (the image ships `/app/web`) or set `WEB_DIR=` to serve the API only. |
+| `connection refused` on 5432 or 9000 while running the binaries | Start the containers first: `docker compose up -d postgres storage`. |
+| Integration tests cannot start containers on rootless Docker | `TESTCONTAINERS_RYUK_DISABLED=true make test-integration`. Test containers are still removed by their cleanup hooks. |
+| You want a clean database and bucket | `make clean` deletes the volumes; the next `make run` migrates from scratch. It is destructive, so use it only for local data. |
+
+Target: a healthy stack from a clean clone in under 15 minutes, including image
+pulls.
+
+## Current state
+
 Current state: **phase 8 (leaflet indexing and retrieval), in review**. Uploads are
 validated, re-encoded to strip EXIF and GPS, stored privately, processed by a
 River job, and exposed through POST/GET /v1/scans. Each image goes through a
@@ -77,35 +226,7 @@ the [phase 6 notes](docs/phases/MedVerify%20NG%20-%2006%20Ingredient%20Safety%20
 the [phase 7 notes](docs/phases/MedVerify%20NG%20-%2007%20Verdict%20Engine.md#11-blockers-and-open-items),
 and the [phase 8 notes](docs/phases/MedVerify%20NG%20-%2008%20Leaflet%20Indexing%20(RAG).md#11-blockers-and-open-items).
 
-## Quickstart
-
-Requirements: Docker with Compose, and Go (see `go.mod` for the pinned version).
-
-```bash
-cp .env.example .env
-make run          # builds images, migrates, waits for /readyz
-curl localhost:8080/healthz
-curl localhost:8080/readyz
-```
-
-Upload a pack photo (the default vision provider is a deterministic fake; set
-`VISION_PROVIDER=claude` or `openai` with a key and pinned model for a real
-extraction):
-
-```bash
-curl -i -X POST localhost:8080/v1/scans \
-  -H "X-API-Key: dev-api-key" \
-  -H "Idempotency-Key: demo-1" \
-  -F "images=@testdata/images/normal.jpg" \
-  -F "latitude=6.45" -F "longitude=3.39" -F "language=en"
-# 201 with status=completed, or 202 with a Location header; then:
-curl -H "X-API-Key: dev-api-key" localhost:8080/v1/scans/<id>
-```
-
-A result never says a medicine is safe, genuine, or authentic. `unreadable`
-means the photo could not be read confidently, not that the product is fake.
-
-### Model providers
+## Model providers
 
 Vision and assistant providers are selected independently:
 
@@ -122,27 +243,6 @@ provider works with any compatible server by pointing it at, for example,
 identifiers must be pinned: a floating alias is accepted by the provider but not
 by review. A `VISION_FALLBACK_MODEL` of the same provider is tried only when the
 primary is unavailable, never when an image is unreadable.
-
-Target: a healthy stack from a clean clone in under 15 minutes, including image
-pulls.
-
-Other useful targets:
-
-```bash
-make test              # unit tests, race detector on
-make test-integration  # testcontainers: pgvector Postgres and S3 storage per package
-make lint              # golangci-lint
-make migrate-status    # against the database in .env
-make job-noop          # enqueue a no-op job; the worker logs it
-make sync-greenbook    # run a full Greenbook product sync now
-make sync-leaflets     # download and extract pending leaflets
-make registry-report   # counts, OCR needs, unknown ingredients, recent runs
-make logs              # follow service logs
-make down              # stop; `make clean` also deletes volumes
-```
-
-Run the binaries on the host instead of in Compose with `go run ./cmd/api` and
-`go run ./cmd/worker`; `.env` already points at the published ports.
 
 ## Operations
 
@@ -167,7 +267,7 @@ internal/
   storage/   S3-compatible object storage (SeaweedFS locally)
   scan/ vision/ registry/ safety/ verdict/ rag/ assistant/ llm/
 migrations/  goose migrations, embedded into the binary
-api/         OpenAPI description
+api/         OpenAPI description, contract tests, and embedded Swagger UI
 docs/        product rules, conventions, and phase documents
 testdata/    fixtures and golden files (added with the first parser)
 evals/       versioned eval datasets (phase 10)
