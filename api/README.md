@@ -123,6 +123,13 @@ A key without the scope for an endpoint gets `403 insufficient_scope`. A
 missing, unknown, revoked, or expired key gets `401 unauthorized`, with no
 detail about which case it was.
 
+In development the server also accepts the shared `API_LEGACY_KEY`
+(`dev-api-key` by default) as a convenience for the bundled web page and the
+quickstart. Database-backed keys are checked first and work at the same time, so
+a key from `admin apikey create` can be used in the web client or Swagger UI
+without changing that setting. Production rejects a non-empty `API_LEGACY_KEY`
+at startup.
+
 Keys are per client. One client cannot read another client's scans: a scan that
 belongs to someone else is reported as `404`, exactly like a scan that does not
 exist, so a response cannot be used to probe for IDs.

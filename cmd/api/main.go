@@ -163,15 +163,20 @@ func run() error {
 	return nil
 }
 
-// buildKeyStore returns the database-backed key store, or the legacy single
-// key in development. Configuration rejects a legacy key in production, so the
-// fallback cannot reach a production deployment.
+// buildKeyStore accepts database-backed keys and, when configured, the legacy
+// single key. Database keys are tried first, so a key issued with
+// `admin apikey create` always works; the legacy key is an additional
+// development convenience, not a mode that disables the database.
+//
+// Configuration rejects a legacy key in production, so the fallback cannot
+// reach a production deployment.
 func buildKeyStore(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) auth.Store {
+	stores := []auth.Store{auth.NewDBStore(pool)}
 	if cfg.API.LegacyKey != "" {
-		logger.Warn("using the legacy single API key; issue database-backed keys instead")
-		return auth.NewSingleKeyStore(auth.SingleKeyOptions{Key: cfg.API.LegacyKey})
+		logger.Warn("also accepting the legacy single API key; issue database-backed keys instead")
+		stores = append(stores, auth.NewSingleKeyStore(auth.SingleKeyOptions{Key: cfg.API.LegacyKey}))
 	}
-	return auth.NewDBStore(pool)
+	return auth.NewChainStore(stores...)
 }
 
 func buildAssistant(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, scans assistant.ScanSource) (*assistant.HTTPHandler, error) {
