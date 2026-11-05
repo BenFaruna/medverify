@@ -1,12 +1,13 @@
-// MedVerify NG web client.
+// MedVerify NG web client (chat interface).
 //
 // This is a plain module with no dependencies and no build step, so it loads
 // quickly on a slow connection. It talks only to the documented public API and
 // never touches an internal endpoint.
 //
-// The API key is held in memory for this tab only. It is deliberately not
-// written to localStorage or a cookie: a key in browser storage outlives the
-// session and is readable by any script that ends up on the page.
+// The API key is read from the page and held in memory for this tab only. It
+// is deliberately not written to localStorage or a cookie: a key in browser
+// storage outlives the session and is readable by any script that ends up on
+// the page.
 
 const MAX_PHOTOS = 4;
 const MAX_LONG_EDGE = 1568;
@@ -17,23 +18,31 @@ const POLL_BUDGET_MS = 120_000;
 let apiKey = "";
 /** @type {string | null} */
 let currentScanId = null;
+/** @type {string | null} Reused when the same photos are retried. */
+let idempotencyKey = null;
+/** True once the current scan has a final result and questions can be asked. */
+let canAsk = false;
+/** True while a request is in flight. */
+let busy = false;
+/** @type {{file: File, url: string}[]} */
+let pendingFiles = [];
+let limitNote = "";
+const asked = new Set();
 
 const el = {
   apiKey: document.getElementById("api-key"),
   apiBase: document.getElementById("api-base"),
-  photos: document.getElementById("photos"),
-  photoCount: document.getElementById("photo-count"),
   language: document.getElementById("language"),
-  submit: document.getElementById("submit"),
-  status: document.getElementById("status"),
-  resultSection: document.getElementById("result-section"),
-  result: document.getElementById("result"),
-  retake: document.getElementById("retake"),
-  askSection: document.getElementById("ask-section"),
-  suggestions: document.getElementById("suggestions"),
-  askForm: document.getElementById("ask-form"),
+  log: document.getElementById("log"),
+  chips: document.getElementById("chips"),
+  form: document.getElementById("chat-form"),
+  tray: document.getElementById("tray"),
+  tools: document.getElementById("tools"),
+  photoBtn: document.getElementById("photo-btn"),
+  photoInput: document.getElementById("photo-input"),
   question: document.getElementById("question"),
-  answers: document.getElementById("answers"),
+  send: document.getElementById("send"),
+  hint: document.getElementById("composer-hint"),
 };
 
 // The verdict wording shown to people. The API never sends a score and this
@@ -51,6 +60,26 @@ const VERDICT_COPY = {
   unreadable: "The photos could not be read clearly. Please take another photo.",
 };
 
+// Only used to colour the stripe beside the verdict. The sentence above is
+// what carries the meaning, so colour is never the only signal.
+const VERDICT_TONE = {
+  consistent_with_records: "ok",
+  mismatch_found: "bad",
+  flagged: "bad",
+  not_found_in_records: "warn",
+  needs_review: "warn",
+  unreadable: "neutral",
+};
+
+// A glyph repeats the tone for people who cannot see the colour. The sentence
+// below the icon is still the only thing that carries the meaning.
+const VERDICT_MARK = {
+  ok: "✓",
+  bad: "!",
+  warn: "!",
+  neutral: "?",
+};
+
 const FIELD_LABELS = {
   nrn: "NRN",
   product_name: "Product name",
@@ -65,6 +94,9 @@ const SUGGESTIONS = [
   "What are the listed ingredients?",
   "Where can I read the leaflet?",
 ];
+
+const ASK_HELP =
+  "Answers come only from NAFDAC records and leaflets, with citations. This is not medical advice.";
 
 // --- API access -----------------------------------------------------------
 
@@ -99,23 +131,27 @@ async function api(path, options = {}) {
   throw new ApiError(response.status, problem);
 }
 
-// --- Photos ---------------------------------------------------------------
-
-function setStatus(message) {
-  el.status.textContent = message;
-}
-
-function updatePhotoCount() {
-  const count = el.photos.files ? el.photos.files.length : 0;
-  if (count === 0) {
-    el.photoCount.textContent = "No photos selected.";
-    return;
+function describeError(error) {
+  if (!(error instanceof ApiError)) {
+    return "The connection failed. Check your network and try again; the same photos will not create a second scan.";
   }
-  const total = Math.min(count, MAX_PHOTOS);
-  el.photoCount.textContent =
-    `${total} photo${total === 1 ? "" : "s"} selected` +
-    (count > MAX_PHOTOS ? ` (only the first ${MAX_PHOTOS} are sent)` : "");
+  const messages = {
+    unauthorized: "That API key was not accepted.",
+    insufficient_scope: "This API key cannot create scans.",
+    rate_limited: "Too many requests. Wait a moment and try again.",
+    quota_exceeded: "This API key has used its daily allowance.",
+    too_many_images: "Send at most four photos.",
+    image_too_large: "One photo is too large even after resizing.",
+    payload_too_large: "The upload is too large. Try fewer photos.",
+    unsupported_format: "Use JPEG, PNG, or WebP photos.",
+    corrupt_image: "One photo could not be read. Try taking it again.",
+    invalid_language: "That language is not supported.",
+    unavailable: "The service is temporarily unavailable. Try again shortly.",
+  };
+  return messages[error.code] || `Something went wrong (${error.code}). Try again.`;
 }
+
+// --- Photos ---------------------------------------------------------------
 
 /**
  * Shrinks a photo before upload. Phones produce 3-8 MB files; a 1568px long
@@ -149,7 +185,31 @@ async function downscale(file) {
   return new File([blob], "photo.jpg", { type: "image/jpeg" });
 }
 
-// --- Result rendering -----------------------------------------------------
+function addFiles(fileList) {
+  const incoming = Array.from(fileList || []);
+  const room = MAX_PHOTOS - pendingFiles.length;
+  for (const file of incoming.slice(0, Math.max(room, 0))) {
+    pendingFiles.push({ file, url: URL.createObjectURL(file) });
+  }
+  limitNote =
+    incoming.length > room ? `Only ${MAX_PHOTOS} photos fit in one check.` : "";
+  idempotencyKey = null;
+  updateComposer();
+}
+
+function removePhoto(index) {
+  const [removed] = pendingFiles.splice(index, 1);
+  if (removed) URL.revokeObjectURL(removed.url);
+  limitNote = "";
+  idempotencyKey = null;
+  updateComposer();
+
+  const buttons = el.tray.querySelectorAll(".remove");
+  const next = buttons[Math.min(index, buttons.length - 1)];
+  (next || el.photoBtn).focus();
+}
+
+// --- Chat helpers ---------------------------------------------------------
 
 function text(tag, className, content) {
   const node = document.createElement(tag);
@@ -158,17 +218,96 @@ function text(tag, className, content) {
   return node;
 }
 
+function scrollToEnd() {
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  requestAnimationFrame(() => {
+    el.log.scrollTo({
+      top: el.log.scrollHeight,
+      behavior: reduced ? "auto" : "smooth",
+    });
+  });
+}
+
+function addMessage(role) {
+  const row = text("div", `msg ${role}`);
+  const bubble = text("div", "bubble");
+  row.append(bubble);
+  el.log.append(row);
+  scrollToEnd();
+  return { row, bubble };
+}
+
+function addUserPhotos(items) {
+  const { bubble } = addMessage("user");
+  bubble.classList.add("photos-bubble");
+  const grid = text("div", items.length === 1 ? "photos single" : "photos");
+  items.forEach((item, index) => {
+    const img = document.createElement("img");
+    img.src = item.url;
+    img.alt = `Photo ${index + 1} of the pack`;
+    grid.append(img);
+  });
+  bubble.append(grid);
+}
+
+function addUserText(message) {
+  const { bubble } = addMessage("user");
+  bubble.append(text("p", null, message));
+}
+
+/** An assistant bubble that shows a status line until a reply replaces it. */
+function addPending(message) {
+  const message_ = addMessage("assistant");
+  const dots = text("span", "dots");
+  dots.setAttribute("aria-hidden", "true");
+  dots.append(document.createElement("span"), document.createElement("span"), document.createElement("span"));
+  const label = text("span", null, message);
+  const wrapper = text("div", "pending");
+  wrapper.append(dots, label);
+  message_.bubble.append(wrapper);
+  return { ...message_, label };
+}
+
+function setStatus(pending, message) {
+  if (pending && pending.label.textContent !== message) {
+    pending.label.textContent = message;
+  }
+}
+
+function settle(pending) {
+  pending.bubble.replaceChildren();
+}
+
+function showError(pending, message) {
+  settle(pending);
+  pending.bubble.classList.add("error");
+  pending.bubble.append(text("p", "error-title", "That did not work"));
+  pending.bubble.append(text("p", null, message));
+  scrollToEnd();
+}
+
+// --- Result rendering -----------------------------------------------------
+
 function renderVerdict(view, container) {
   const verdict = view.verdict;
   if (!verdict) {
-    container.append(
-      text("p", "hint", "This pack has no verdict yet."),
-    );
+    container.append(text("p", "hint", "This pack has no verdict yet."));
     return;
   }
 
+  const tone = VERDICT_TONE[verdict.value] || "warn";
   const block = text("div", "verdict");
-  block.append(text("h3", null, VERDICT_COPY[verdict.value] || "This pack needs a closer look."));
+  block.dataset.tone = tone;
+
+  const head = text("div", "verdict-head");
+  const mark = text("span", "verdict-mark", VERDICT_MARK[tone] || "!");
+  mark.setAttribute("aria-hidden", "true");
+  const copy = text("div", "verdict-copy");
+  copy.append(text("p", "verdict-kicker", "Result"));
+  copy.append(text("h2", null, VERDICT_COPY[verdict.value] || "This pack needs a closer look."));
+  head.append(mark, copy);
+
+  block.append(head);
   block.append(text("p", "confidence", `Confidence: ${verdict.confidence}`));
   container.append(block);
 }
@@ -176,7 +315,7 @@ function renderVerdict(view, container) {
 function renderFlags(flags, container) {
   if (!Array.isArray(flags) || flags.length === 0) return;
 
-  container.append(text("h4", null, "Flags"));
+  container.append(text("h3", null, "Flags"));
   for (const flag of flags) {
     const item = text("div", "flag");
     item.append(text("p", null, `A ${flag.severity} severity finding: ${flag.type.replaceAll("_", " ")}.`));
@@ -200,13 +339,15 @@ function renderFlags(flags, container) {
 function renderReasons(reasons, container) {
   if (!Array.isArray(reasons) || reasons.length === 0) return;
 
-  container.append(text("h4", null, "Why"));
   const list = document.createElement("ul");
   for (const reason of reasons) {
     // Show the reviewed sentence, never the code.
     if (reason.text) list.append(text("li", null, reason.text));
   }
-  if (list.childElementCount > 0) container.append(list);
+  if (list.childElementCount > 0) {
+    container.append(text("h3", null, "Why"));
+    container.append(list);
+  }
 }
 
 function renderExtracted(extracted, container) {
@@ -224,7 +365,7 @@ function renderExtracted(extracted, container) {
   }
   if (rows.length === 0) return;
 
-  container.append(text("h4", null, "Read from the pack"));
+  container.append(text("h3", null, "Read from the pack"));
   const list = text("dl", "fields");
   for (const [label, value] of rows) {
     const row = document.createElement("div");
@@ -238,7 +379,7 @@ function renderExtracted(extracted, container) {
 function renderRegistry(features, container) {
   if (!features || !features.outcome) return;
 
-  container.append(text("h4", null, "NAFDAC records"));
+  container.append(text("h3", null, "NAFDAC records"));
   const product = features.product;
   if (product) {
     const parts = [product.name, product.nrn && `NRN ${product.nrn}`, product.status]
@@ -265,15 +406,15 @@ function renderRegistry(features, container) {
   }
 }
 
-function renderResult(view) {
-  const container = el.result;
-  container.replaceChildren();
+function isTerminal(status) {
+  return ["completed", "unreadable", "failed"].includes(status);
+}
 
-  const status = view.status;
-  if (status === "queued" || status === "processing") {
-    container.append(text("p", null, "Still checking this pack…"));
-  }
+function showResult(pending, view) {
+  settle(pending);
+  pending.row.classList.add("wide");
 
+  const container = text("div", "result");
   renderVerdict(view, container);
   renderReasons(view.reasons, container);
   renderFlags(view.flags, container);
@@ -284,66 +425,58 @@ function renderResult(view) {
     container.append(text("p", "hint", view.disclaimer));
   }
 
-  el.resultSection.hidden = false;
-  const terminal = ["completed", "unreadable", "failed"].includes(status);
-  el.askSection.hidden = !terminal;
-  if (terminal) {
-    el.resultSection.querySelector("h2").focus?.();
-  }
+  pending.bubble.append(container);
+  scrollToEnd();
 }
 
 // --- Upload and poll ------------------------------------------------------
 
-async function poll(scanId) {
+async function poll(scanId, pending) {
   const started = Date.now();
   let delay = 700;
 
   while (Date.now() - started < POLL_BUDGET_MS) {
     const view = await api(`/v1/scans/${scanId}`);
-    renderResult(view);
-    if (["completed", "unreadable", "failed"].includes(view.status)) return view;
+    if (isTerminal(view.status)) return view;
 
-    setStatus("Still checking. This can take a few seconds…");
+    setStatus(pending, "Still checking. This can take a few seconds…");
     await new Promise((resolve) => setTimeout(resolve, delay));
     // Back off gently so a slow scan does not hammer the API.
     delay = Math.min(delay * 1.6, 5000);
   }
-
-  setStatus("This is taking longer than usual. Reload the page to check again.");
   return null;
 }
 
-async function upload(event) {
-  event.preventDefault();
-
+async function sendPack() {
   apiKey = el.apiKey.value.trim();
+  const batch = pendingFiles.slice(0, MAX_PHOTOS);
+  if (batch.length === 0) return;
+
   if (!apiKey) {
-    setStatus("Enter your API key first.");
-    el.apiKey.focus();
-    return;
-  }
-  const files = Array.from(el.photos.files || []).slice(0, MAX_PHOTOS);
-  if (files.length === 0) {
-    setStatus("Choose at least one photo of the pack.");
-    el.photos.focus();
+    const note = addMessage("assistant");
+    note.bubble.classList.add("error");
+    note.bubble.append(text("p", null, "No API key is set for this page."));
     return;
   }
 
-  el.submit.disabled = true;
-  el.askSection.hidden = true;
-  setStatus("Preparing your photos…");
+  busy = true;
+  limitNote = "";
+  addUserPhotos(batch);
+  pendingFiles = [];
+  updateComposer();
+  const pending = addPending("Preparing your photos…");
 
   try {
     const form = new FormData();
-    for (const file of files) {
-      form.append("images", await downscale(file));
+    for (const item of batch) {
+      form.append("images", await downscale(item.file));
     }
     if (el.language.value) form.append("language", el.language.value);
 
-    setStatus("Uploading…");
+    setStatus(pending, "Uploading…");
     // The same key makes a retry safe: the API returns the first scan instead
-    // of creating a duplicate.
-    const idempotencyKey = crypto.randomUUID();
+    // of creating a duplicate. It is cleared when the photos change.
+    idempotencyKey ??= crypto.randomUUID();
     const response = await fetch(`${apiBase()}/v1/scans`, {
       method: "POST",
       headers: {
@@ -365,65 +498,39 @@ async function upload(event) {
 
     const created = await response.json();
     currentScanId = created.id;
-    renderResult(created);
+    idempotencyKey = null;
 
-    if (created.status === "queued" || created.status === "processing") {
-      await poll(currentScanId);
+    let view = created;
+    if (!isTerminal(view.status)) {
+      view = await poll(currentScanId, pending);
     }
-    setStatus("");
-    renderSuggestions();
-  } catch (error) {
-    setStatus(describeError(error));
-  } finally {
-    el.submit.disabled = false;
-    updatePhotoCount();
-  }
-}
 
-function describeError(error) {
-  if (!(error instanceof ApiError)) {
-    return "The connection failed. Check your network and try again; the same photos will not create a second scan.";
+    if (view) {
+      showResult(pending, view);
+      canAsk = true;
+      asked.clear();
+      renderChips();
+    } else {
+      showError(pending, "This is taking longer than usual. Reload the page to check again.");
+    }
+  } catch (error) {
+    // Keep the photos so the person can send them again without re-picking.
+    pendingFiles = batch;
+    showError(pending, describeError(error));
+  } finally {
+    busy = false;
+    updateComposer();
   }
-  const messages = {
-    unauthorized: "That API key was not accepted.",
-    insufficient_scope: "This API key cannot create scans.",
-    rate_limited: "Too many requests. Wait a moment and try again.",
-    quota_exceeded: "This API key has used its daily allowance.",
-    too_many_images: "Send at most four photos.",
-    image_too_large: "One photo is too large even after resizing.",
-    payload_too_large: "The upload is too large. Try fewer photos.",
-    unsupported_format: "Use JPEG, PNG, or WebP photos.",
-    corrupt_image: "One photo could not be read. Try taking it again.",
-    invalid_language: "That language is not supported.",
-    unavailable: "The service is temporarily unavailable. Try again shortly.",
-  };
-  return messages[error.code] || `Something went wrong (${error.code}). Try again.`;
 }
 
 // --- Questions ------------------------------------------------------------
 
-function renderSuggestions() {
-  el.suggestions.replaceChildren();
-  if (!currentScanId) return;
+function showAnswer(pending, answer) {
+  settle(pending);
 
-  for (const suggestion of SUGGESTIONS) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = suggestion;
-    button.addEventListener("click", () => {
-      el.question.value = suggestion;
-      el.question.focus();
-    });
-    el.suggestions.append(button);
-  }
-}
-
-function renderAnswer(answer) {
-  const block = text("div", "answer");
-
-  const body = text("p", null, answer.answer);
-  if (answer.fallback || !answer.verified) body.className = "fixed";
-  block.append(body);
+  const body = text("p", "answer-text", answer.answer);
+  if (answer.fallback || !answer.verified) body.classList.add("fixed");
+  pending.bubble.append(body);
 
   if (Array.isArray(answer.sources) && answer.sources.length > 0) {
     const citations = text("div", "citations");
@@ -431,71 +538,177 @@ function renderAnswer(answer) {
     const list = document.createElement("ul");
     for (const source of answer.sources) {
       const item = document.createElement("li");
+      const label = `${source.label}: ${source.title || source.kind}`;
       if (source.url) {
         const link = document.createElement("a");
         link.href = source.url;
         link.rel = "noopener noreferrer";
         link.target = "_blank";
-        link.textContent = `${source.label}: ${source.title || source.kind}`;
+        link.textContent = label;
         item.append(link);
       } else {
-        item.textContent = `${source.label}: ${source.title || source.kind}`;
+        item.textContent = label;
       }
       list.append(item);
     }
     citations.append(list);
-    block.append(citations);
+    pending.bubble.append(citations);
   }
-
-  el.answers.prepend(block);
+  scrollToEnd();
 }
 
-async function ask(event) {
-  event.preventDefault();
-  const question = el.question.value.trim();
-  if (!question || !currentScanId) return;
+async function sendQuestion(question) {
+  if (busy || !canAsk || !currentScanId || !question) return;
 
-  const button = el.askForm.querySelector("button");
-  button.disabled = true;
+  busy = true;
+  asked.add(question);
+  addUserText(question);
+  el.question.value = "";
+  renderChips();
+  updateComposer();
+  const pending = addPending("Checking the records…");
+
   try {
     const answer = await api(`/v1/scans/${currentScanId}/questions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question }),
     });
-    renderAnswer(answer);
-    el.question.value = "";
+    showAnswer(pending, answer);
   } catch (error) {
-    el.answers.prepend(text("div", "answer", describeError(error)));
+    // Give the question back so a retry is one tap.
+    el.question.value = question;
+    asked.delete(question);
+    renderChips();
+    showError(pending, describeError(error));
   } finally {
-    button.disabled = false;
+    busy = false;
+    updateComposer();
   }
 }
 
-// --- Wiring ---------------------------------------------------------------
+function renderChips() {
+  el.chips.replaceChildren();
+  if (!canAsk) return;
+
+  for (const suggestion of SUGGESTIONS) {
+    if (asked.has(suggestion)) continue;
+    const button = text("button", "chip", suggestion);
+    button.type = "button";
+    button.addEventListener("click", () => sendQuestion(suggestion));
+    el.chips.append(button);
+  }
+
+  const another = text("button", "chip new", "Check another pack");
+  another.type = "button";
+  another.addEventListener("click", reset);
+  el.chips.append(another);
+}
+
+// --- Composer state -------------------------------------------------------
+
+function photoHint() {
+  const count = pendingFiles.length;
+  let message =
+    count === 0
+      ? `Add up to ${MAX_PHOTOS} photos: front, back and a side.`
+      : `${count} of ${MAX_PHOTOS} photos ready.`;
+  if (limitNote) message += ` ${limitNote}`;
+  return message;
+}
+
+function renderTray() {
+  el.tray.replaceChildren();
+  el.tray.hidden = pendingFiles.length === 0 || canAsk;
+
+  pendingFiles.forEach((item, index) => {
+    const li = document.createElement("li");
+    const img = document.createElement("img");
+    img.src = item.url;
+    img.alt = `Photo ${index + 1}`;
+    const remove = text("button", "remove", "×");
+    remove.type = "button";
+    remove.setAttribute("aria-label", `Remove photo ${index + 1}`);
+    remove.addEventListener("click", () => removePhoto(index));
+    li.append(img, remove);
+    el.tray.append(li);
+  });
+}
+
+function updateComposer() {
+  el.tools.hidden = canAsk;
+  el.photoBtn.disabled = busy;
+
+  const count = pendingFiles.length;
+  el.photoBtn.setAttribute(
+    "aria-label",
+    count === 0
+      ? "Add photos of the pack"
+      : `Add photos of the pack, ${count} of ${MAX_PHOTOS} selected`,
+  );
+
+  el.question.disabled = !canAsk;
+  el.question.placeholder = canAsk ? "Ask about this pack" : "Add photos to begin";
+
+  renderTray();
+
+  const ready = canAsk
+    ? el.question.value.trim().length > 0
+    : pendingFiles.length > 0;
+  el.send.setAttribute("aria-disabled", String(busy || !ready));
+  el.send.setAttribute("aria-label", canAsk ? "Ask" : "Check this pack");
+
+  // Replacing the node on every keystroke would re-announce the hint, so only
+  // write when the wording actually changes.
+  const hintText = canAsk ? ASK_HELP : photoHint();
+  if (el.hint.textContent !== hintText) el.hint.textContent = hintText;
+}
 
 function reset() {
+  if (busy) return;
   currentScanId = null;
-  el.result.replaceChildren();
-  el.answers.replaceChildren();
-  el.resultSection.hidden = true;
-  el.askSection.hidden = true;
-  el.photos.value = "";
-  updatePhotoCount();
-  setStatus("");
-  el.photos.focus();
+  canAsk = false;
+  idempotencyKey = null;
+  limitNote = "";
+  asked.clear();
+  for (const item of pendingFiles) URL.revokeObjectURL(item.url);
+  pendingFiles = [];
+  el.question.value = "";
+  el.chips.replaceChildren();
+
+  const note = addMessage("assistant");
+  note.bubble.append(text("p", null, "Ready for the next pack. Add its photos below."));
+
+  updateComposer();
+  el.photoBtn.focus();
 }
+
+// --- Wiring ---------------------------------------------------------------
 
 function init() {
   // Default the API address to the page's own origin: the API serves this
   // client in the MVP, so same-origin avoids a CORS preflight entirely.
   el.apiBase.value = window.location.origin;
-  updatePhotoCount();
 
-  el.photos.addEventListener("change", updatePhotoCount);
-  el.submit.addEventListener("click", upload);
-  el.retake.addEventListener("click", reset);
-  el.askForm.addEventListener("submit", ask);
+  el.photoBtn.addEventListener("click", () => el.photoInput.click());
+  el.photoInput.addEventListener("change", () => {
+    addFiles(el.photoInput.files);
+    // Clear it so choosing the same photo again still fires "change".
+    el.photoInput.value = "";
+  });
+
+  el.question.addEventListener("input", updateComposer);
+  el.form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (busy || el.send.getAttribute("aria-disabled") === "true") return;
+    if (canAsk) {
+      sendQuestion(el.question.value.trim());
+    } else {
+      sendPack();
+    }
+  });
+
+  updateComposer();
 }
 
 init();
