@@ -9,6 +9,8 @@
 // storage outlives the session and is readable by any script that ends up on
 // the page.
 
+import { COPY, REVIEWED_LANGUAGES, copyFor } from "./copy.js";
+
 const MAX_PHOTOS = 4;
 const MAX_LONG_EDGE = 1568;
 const JPEG_QUALITY = 0.82;
@@ -28,6 +30,15 @@ let busy = false;
 let pendingFiles = [];
 let limitNote = "";
 const asked = new Set();
+/** @type {object | null} Last rendered scan, kept so a language change can re-render it. */
+let lastView = null;
+/** @type {HTMLElement | null} */
+let lastResultContainer = null;
+
+/** @type {object} */
+let activeCopy = COPY.en;
+/** @type {string} Language actually in use after the review gate. */
+let activeLanguage = "en";
 
 const el = {
   apiKey: document.getElementById("api-key"),
@@ -45,19 +56,58 @@ const el = {
   hint: document.getElementById("composer-hint"),
 };
 
+function t(key, params) {
+  const template = activeCopy[key] ?? COPY.en[key] ?? key;
+  return template.replace(/\{(\w+)\}/g, (match, name) =>
+    params && params[name] !== undefined ? String(params[name]) : match,
+  );
+}
+
+// Rewrites the static page and anything already rendered for the selected
+// language. Pidgin stays inactive until REVIEWED_LANGUAGES includes it.
+function applyCopy() {
+  const { language, copy } = copyFor(el.language?.value);
+  activeCopy = copy;
+  activeLanguage = language;
+  document.documentElement.lang = language;
+  document.title = copy.pageTitle;
+
+  for (const node of document.querySelectorAll("[data-copy]")) {
+    const value = copy[node.dataset.copy];
+    if (value !== undefined) node.textContent = value;
+  }
+  for (const node of document.querySelectorAll("[data-copy-aria-label]")) {
+    const value = copy[node.dataset.copyAriaLabel];
+    if (value !== undefined) node.setAttribute("aria-label", value);
+  }
+  for (const node of document.querySelectorAll("[data-copy-title]")) {
+    const value = copy[node.dataset.copyTitle];
+    if (value !== undefined) node.setAttribute("title", value);
+  }
+  for (const node of document.querySelectorAll("[data-copy-content]")) {
+    const value = copy[node.dataset.copyContent];
+    if (value !== undefined) node.setAttribute("content", value);
+  }
+
+  const languageHint = document.getElementById("language-hint");
+  if (languageHint) {
+    languageHint.textContent = copy.languageHintReady;
+  }
+
+  updateComposer();
+  renderChips();
+  rerenderResult();
+}
+
 // The verdict wording shown to people. The API never sends a score and this
 // client never invents one. No entry claims a medicine is safe or genuine.
-const VERDICT_COPY = {
-  consistent_with_records:
-    "The details printed on this pack agree with the NAFDAC record found for it.",
-  mismatch_found:
-    "A detail printed on this pack disagrees with the NAFDAC record found for it.",
-  not_found_in_records:
-    "No matching record was found in our NAFDAC data. Our data can be incomplete, so this does not mean the pack is fake.",
-  flagged: "A NAFDAC alert or a safety check applies to this pack.",
-  needs_review:
-    "The evidence is ambiguous or incomplete, so this pack needs a closer look.",
-  unreadable: "The photos could not be read clearly. Please take another photo.",
+const VERDICT_KEYS = {
+  consistent_with_records: "verdictConsistent",
+  mismatch_found: "verdictMismatch",
+  not_found_in_records: "verdictNotFound",
+  flagged: "verdictFlagged",
+  needs_review: "verdictNeedsReview",
+  unreadable: "verdictUnreadable",
 };
 
 // Only used to colour the stripe beside the verdict. The sentence above is
@@ -81,22 +131,15 @@ const VERDICT_MARK = {
 };
 
 const FIELD_LABELS = {
-  nrn: "NRN",
-  product_name: "Product name",
-  manufacturer: "Manufacturer",
-  batch_no: "Batch number",
-  mfg_date: "Manufactured",
-  expiry_date: "Expiry",
+  nrn: "fieldNrn",
+  product_name: "fieldProductName",
+  manufacturer: "fieldManufacturer",
+  batch_no: "fieldBatchNo",
+  mfg_date: "fieldManufactured",
+  expiry_date: "fieldExpiry",
 };
 
-const SUGGESTIONS = [
-  "What does the NAFDAC record say about this product?",
-  "What are the listed ingredients?",
-  "Where can I read the leaflet?",
-];
-
-const ASK_HELP =
-  "Answers come only from NAFDAC records and leaflets, with citations. This is not medical advice.";
+const SUGGESTIONS = ["suggestionRecord", "suggestionIngredients", "suggestionLeaflet"];
 
 // --- API access -----------------------------------------------------------
 
@@ -133,22 +176,22 @@ async function api(path, options = {}) {
 
 function describeError(error) {
   if (!(error instanceof ApiError)) {
-    return "The connection failed. Check your network and try again; the same photos will not create a second scan.";
+    return t("connectionFailed");
   }
   const messages = {
-    unauthorized: "That API key was not accepted.",
-    insufficient_scope: "This API key cannot create scans.",
-    rate_limited: "Too many requests. Wait a moment and try again.",
-    quota_exceeded: "This API key has used its daily allowance.",
-    too_many_images: "Send at most four photos.",
-    image_too_large: "One photo is too large even after resizing.",
-    payload_too_large: "The upload is too large. Try fewer photos.",
-    unsupported_format: "Use JPEG, PNG, or WebP photos.",
-    corrupt_image: "One photo could not be read. Try taking it again.",
-    invalid_language: "That language is not supported.",
-    unavailable: "The service is temporarily unavailable. Try again shortly.",
+    unauthorized: "errorUnauthorized",
+    insufficient_scope: "errorInsufficientScope",
+    rate_limited: "errorRateLimited",
+    quota_exceeded: "errorQuotaExceeded",
+    too_many_images: "errorTooManyImages",
+    image_too_large: "errorImageTooLarge",
+    payload_too_large: "errorPayloadTooLarge",
+    unsupported_format: "errorUnsupportedFormat",
+    corrupt_image: "errorCorruptImage",
+    invalid_language: "errorInvalidLanguage",
+    unavailable: "errorUnavailable",
   };
-  return messages[error.code] || `Something went wrong (${error.code}). Try again.`;
+  return t(messages[error.code] || "errorGeneric", { code: error.code });
 }
 
 // --- Photos ---------------------------------------------------------------
@@ -192,7 +235,7 @@ function addFiles(fileList) {
     pendingFiles.push({ file, url: URL.createObjectURL(file) });
   }
   limitNote =
-    incoming.length > room ? `Only ${MAX_PHOTOS} photos fit in one check.` : "";
+    incoming.length > room ? t("photosFit", { max: MAX_PHOTOS }) : "";
   idempotencyKey = null;
   updateComposer();
 }
@@ -244,7 +287,7 @@ function addUserPhotos(items) {
   items.forEach((item, index) => {
     const img = document.createElement("img");
     img.src = item.url;
-    img.alt = `Photo ${index + 1} of the pack`;
+    img.alt = t("photoAlt", { index: index + 1 });
     grid.append(img);
   });
   bubble.append(grid);
@@ -281,7 +324,7 @@ function settle(pending) {
 function showError(pending, message) {
   settle(pending);
   pending.bubble.classList.add("error");
-  pending.bubble.append(text("p", "error-title", "That did not work"));
+  pending.bubble.append(text("p", "error-title", t("errorTitle")));
   pending.bubble.append(text("p", null, message));
   scrollToEnd();
 }
@@ -291,7 +334,7 @@ function showError(pending, message) {
 function renderVerdict(view, container) {
   const verdict = view.verdict;
   if (!verdict) {
-    container.append(text("p", "hint", "This pack has no verdict yet."));
+    container.append(text("p", "hint", t("noVerdict")));
     return;
   }
 
@@ -303,22 +346,32 @@ function renderVerdict(view, container) {
   const mark = text("span", "verdict-mark", VERDICT_MARK[tone] || "!");
   mark.setAttribute("aria-hidden", "true");
   const copy = text("div", "verdict-copy");
-  copy.append(text("p", "verdict-kicker", "Result"));
-  copy.append(text("h2", null, VERDICT_COPY[verdict.value] || "This pack needs a closer look."));
+  copy.append(text("p", "verdict-kicker", t("resultKicker")));
+  const verdictKey = VERDICT_KEYS[verdict.value] || "verdictNeedsLook";
+  copy.append(text("h2", null, t(verdictKey)));
   head.append(mark, copy);
 
   block.append(head);
-  block.append(text("p", "confidence", `Confidence: ${verdict.confidence}`));
+  block.append(text("p", "confidence", t("confidence", { value: verdict.confidence })));
   container.append(block);
 }
 
 function renderFlags(flags, container) {
   if (!Array.isArray(flags) || flags.length === 0) return;
 
-  container.append(text("h3", null, "Flags"));
+  container.append(text("h3", null, t("flagsHeading")));
   for (const flag of flags) {
     const item = text("div", "flag");
-    item.append(text("p", null, `A ${flag.severity} severity finding: ${flag.type.replaceAll("_", " ")}.`));
+    item.append(
+      text(
+        "p",
+        null,
+        t("flagSeverity", {
+          severity: flag.severity,
+          type: flag.type.replaceAll("_", " "),
+        }),
+      ),
+    );
 
     // Every flag must cite where it came from. Keep the link text meaningful.
     const source = flag.source || {};
@@ -327,7 +380,7 @@ function renderFlags(flags, container) {
       link.href = source.url;
       link.rel = "noopener noreferrer";
       link.target = "_blank";
-      link.textContent = source.title || "Source document";
+      link.textContent = source.title || t("sourceDocument");
       item.append(link);
     } else if (source.title) {
       item.append(text("p", "hint", source.title));
@@ -345,7 +398,7 @@ function renderReasons(reasons, container) {
     if (reason.text) list.append(text("li", null, reason.text));
   }
   if (list.childElementCount > 0) {
-    container.append(text("h3", null, "Why"));
+    container.append(text("h3", null, t("whyHeading")));
     container.append(list);
   }
 }
@@ -354,18 +407,18 @@ function renderExtracted(extracted, container) {
   if (!extracted) return;
 
   const rows = [];
-  for (const [key, label] of Object.entries(FIELD_LABELS)) {
+  for (const [key, labelKey] of Object.entries(FIELD_LABELS)) {
     const field = extracted[key];
     if (!field || !field.value) continue;
     const confidence =
       typeof field.confidence === "number"
         ? ` (${Math.round(field.confidence * 100)}%)`
         : "";
-    rows.push([label, `${field.value}${confidence}`]);
+    rows.push([t(labelKey), `${field.value}${confidence}`]);
   }
   if (rows.length === 0) return;
 
-  container.append(text("h3", null, "Read from the pack"));
+  container.append(text("h3", null, t("readFromPack")));
   const list = text("dl", "fields");
   for (const [label, value] of rows) {
     const row = document.createElement("div");
@@ -379,7 +432,7 @@ function renderExtracted(extracted, container) {
 function renderRegistry(features, container) {
   if (!features || !features.outcome) return;
 
-  container.append(text("h3", null, "NAFDAC records"));
+  container.append(text("h3", null, t("nafdacRecords")));
   const product = features.product;
   if (product) {
     const parts = [product.name, product.nrn && `NRN ${product.nrn}`, product.status]
@@ -388,20 +441,23 @@ function renderRegistry(features, container) {
     container.append(text("p", null, parts));
   } else {
     const outcomeCopy = {
-      not_found_in_dataset:
-        "No record matched the read details. Our dataset can be incomplete, so this is not proof of a problem.",
-      candidate_only: "A possible match was found but it was not confirmed.",
-      ambiguous: "More than one possible match was found.",
-      unreadable_input: "The pack details could not be read well enough to compare.",
+      not_found_in_dataset: "recordNotFound",
+      candidate_only: "recordCandidateOnly",
+      ambiguous: "recordAmbiguous",
+      unreadable_input: "recordUnreadableInput",
     };
     container.append(
-      text("p", null, outcomeCopy[features.outcome] || "The record comparison was inconclusive."),
+      text("p", null, t(outcomeCopy[features.outcome] || "recordInconclusive")),
     );
   }
 
   if (features.dataset && features.dataset.products) {
     container.append(
-      text("p", "hint", `Compared against ${features.dataset.products} NAFDAC records.`),
+      text(
+        "p",
+        "hint",
+        t("comparedAgainst", { count: features.dataset.products }),
+      ),
     );
   }
 }
@@ -410,11 +466,8 @@ function isTerminal(status) {
   return ["completed", "unreadable", "failed"].includes(status);
 }
 
-function showResult(pending, view) {
-  settle(pending);
-  pending.row.classList.add("wide");
-
-  const container = text("div", "result");
+function renderResult(view, container) {
+  container.replaceChildren();
   renderVerdict(view, container);
   renderReasons(view.reasons, container);
   renderFlags(view.flags, container);
@@ -424,8 +477,24 @@ function showResult(pending, view) {
   if (view.disclaimer) {
     container.append(text("p", "hint", view.disclaimer));
   }
+}
 
+function rerenderResult() {
+  if (lastView && lastResultContainer && lastResultContainer.isConnected) {
+    renderResult(lastView, lastResultContainer);
+  }
+}
+
+function showResult(pending, view) {
+  settle(pending);
+  pending.row.classList.add("wide");
+
+  const container = text("div", "result");
+  renderResult(view, container);
   pending.bubble.append(container);
+
+  lastView = view;
+  lastResultContainer = container;
   scrollToEnd();
 }
 
@@ -439,7 +508,7 @@ async function poll(scanId, pending) {
     const view = await api(`/v1/scans/${scanId}`);
     if (isTerminal(view.status)) return view;
 
-    setStatus(pending, "Still checking. This can take a few seconds…");
+    setStatus(pending, t("stillChecking"));
     await new Promise((resolve) => setTimeout(resolve, delay));
     // Back off gently so a slow scan does not hammer the API.
     delay = Math.min(delay * 1.6, 5000);
@@ -455,7 +524,7 @@ async function sendPack() {
   if (!apiKey) {
     const note = addMessage("assistant");
     note.bubble.classList.add("error");
-    note.bubble.append(text("p", null, "No API key is set for this page."));
+    note.bubble.append(text("p", null, t("noApiKey")));
     return;
   }
 
@@ -464,16 +533,16 @@ async function sendPack() {
   addUserPhotos(batch);
   pendingFiles = [];
   updateComposer();
-  const pending = addPending("Preparing your photos…");
+  const pending = addPending(t("preparingPhotos"));
 
   try {
     const form = new FormData();
     for (const item of batch) {
       form.append("images", await downscale(item.file));
     }
-    if (el.language.value) form.append("language", el.language.value);
+    form.append("language", activeLanguage);
 
-    setStatus(pending, "Uploading…");
+    setStatus(pending, t("uploading"));
     // The same key makes a retry safe: the API returns the first scan instead
     // of creating a duplicate. It is cleared when the photos change.
     idempotencyKey ??= crypto.randomUUID();
@@ -511,7 +580,7 @@ async function sendPack() {
       asked.clear();
       renderChips();
     } else {
-      showError(pending, "This is taking longer than usual. Reload the page to check again.");
+      showError(pending, t("takingTooLong"));
     }
   } catch (error) {
     // Keep the photos so the person can send them again without re-picking.
@@ -534,7 +603,7 @@ function showAnswer(pending, answer) {
 
   if (Array.isArray(answer.sources) && answer.sources.length > 0) {
     const citations = text("div", "citations");
-    citations.append(text("p", null, "Sources:"));
+    citations.append(text("p", null, t("sources")));
     const list = document.createElement("ul");
     for (const source of answer.sources) {
       const item = document.createElement("li");
@@ -566,7 +635,7 @@ async function sendQuestion(question) {
   el.question.value = "";
   renderChips();
   updateComposer();
-  const pending = addPending("Checking the records…");
+  const pending = addPending(t("checkingRecords"));
 
   try {
     const answer = await api(`/v1/scans/${currentScanId}/questions`, {
@@ -591,7 +660,8 @@ function renderChips() {
   el.chips.replaceChildren();
   if (!canAsk) return;
 
-  for (const suggestion of SUGGESTIONS) {
+  for (const key of SUGGESTIONS) {
+    const suggestion = t(key);
     if (asked.has(suggestion)) continue;
     const button = text("button", "chip", suggestion);
     button.type = "button";
@@ -599,7 +669,7 @@ function renderChips() {
     el.chips.append(button);
   }
 
-  const another = text("button", "chip new", "Check another pack");
+  const another = text("button", "chip new", t("checkAnotherPack"));
   another.type = "button";
   another.addEventListener("click", reset);
   el.chips.append(another);
@@ -611,8 +681,8 @@ function photoHint() {
   const count = pendingFiles.length;
   let message =
     count === 0
-      ? `Add up to ${MAX_PHOTOS} photos: front, back and a side.`
-      : `${count} of ${MAX_PHOTOS} photos ready.`;
+      ? t("addUpTo", { max: MAX_PHOTOS })
+      : t("photosReadyCount", { count, max: MAX_PHOTOS });
   if (limitNote) message += ` ${limitNote}`;
   return message;
 }
@@ -625,10 +695,10 @@ function renderTray() {
     const li = document.createElement("li");
     const img = document.createElement("img");
     img.src = item.url;
-    img.alt = `Photo ${index + 1}`;
+    img.alt = t("photoThumbAlt", { index: index + 1 });
     const remove = text("button", "remove", "×");
     remove.type = "button";
-    remove.setAttribute("aria-label", `Remove photo ${index + 1}`);
+    remove.setAttribute("aria-label", t("removePhoto", { index: index + 1 }));
     remove.addEventListener("click", () => removePhoto(index));
     li.append(img, remove);
     el.tray.append(li);
@@ -643,12 +713,14 @@ function updateComposer() {
   el.photoBtn.setAttribute(
     "aria-label",
     count === 0
-      ? "Add photos of the pack"
-      : `Add photos of the pack, ${count} of ${MAX_PHOTOS} selected`,
+      ? t("addPhotosOfPack")
+      : t("addPhotosSelected", { count, max: MAX_PHOTOS }),
   );
 
   el.question.disabled = !canAsk;
-  el.question.placeholder = canAsk ? "Ask about this pack" : "Add photos to begin";
+  el.question.placeholder = canAsk
+    ? t("askAboutPack")
+    : t("addPhotosToBegin");
 
   renderTray();
 
@@ -656,11 +728,11 @@ function updateComposer() {
     ? el.question.value.trim().length > 0
     : pendingFiles.length > 0;
   el.send.setAttribute("aria-disabled", String(busy || !ready));
-  el.send.setAttribute("aria-label", canAsk ? "Ask" : "Check this pack");
+  el.send.setAttribute("aria-label", canAsk ? t("ask") : t("checkThisPack"));
 
   // Replacing the node on every keystroke would re-announce the hint, so only
   // write when the wording actually changes.
-  const hintText = canAsk ? ASK_HELP : photoHint();
+  const hintText = canAsk ? t("askHelp") : photoHint();
   if (el.hint.textContent !== hintText) el.hint.textContent = hintText;
 }
 
@@ -670,6 +742,8 @@ function reset() {
   canAsk = false;
   idempotencyKey = null;
   limitNote = "";
+  lastView = null;
+  lastResultContainer = null;
   asked.clear();
   for (const item of pendingFiles) URL.revokeObjectURL(item.url);
   pendingFiles = [];
@@ -677,7 +751,7 @@ function reset() {
   el.chips.replaceChildren();
 
   const note = addMessage("assistant");
-  note.bubble.append(text("p", null, "Ready for the next pack. Add its photos below."));
+  note.bubble.append(text("p", null, t("readyNextPack")));
 
   updateComposer();
   el.photoBtn.focus();
@@ -698,6 +772,7 @@ function init() {
   });
 
   el.question.addEventListener("input", updateComposer);
+  el.language.addEventListener("change", applyCopy);
   el.form.addEventListener("submit", (event) => {
     event.preventDefault();
     if (busy || el.send.getAttribute("aria-disabled") === "true") return;
@@ -708,7 +783,7 @@ function init() {
     }
   });
 
-  updateComposer();
+  applyCopy();
 }
 
 init();
