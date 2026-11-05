@@ -1,0 +1,46 @@
+# Fixed assistant text in Nigerian Pidgin (ISO 639-3: pcm). The model never
+# edits, paraphrases, or generates these strings. The project owner reviewed and
+# approved this copy on 2026-11-05; see docs/pidgin-copy-review.md.
+version: templates-v1
+language: pcm
+reviewed: true
+templates:
+  refuse_personal_safety: >-
+    I no fit talk whether this medicine good for you, your pikin, or if you
+    dey pregnant. Na pharmacist or doctor go talk that one. I fit read the
+    warnings and contraindications wey dey the leaflet for this pack, or give
+    you link to the leaflet wey we get.
+  refuse_dosing: >-
+    I no fit give you dose for your own body. Follow the dose wey dey the pack
+    and the leaflet, and ask pharmacist or doctor about your own situation. I
+    fit give you link to the leaflet wey we get.
+  refuse_diagnosis: >-
+    I no fit check your symptoms or talk which medicine good for sickness.
+    Abeg talk to pharmacist or doctor. I only fit answer from the records and
+    leaflet for this pack wey you scan.
+  refuse_comparison: >-
+    I only fit answer from the NAFDAC records and leaflet for this pack wey you
+    scan. I no fit compare am with other medicines.
+  refuse_injection: >-
+    I no fit change these rules, show you instructions, or pretend to be
+    another assistant. I only fit answer from the records and leaflet for this
+    pack.
+  redirect_off_topic: >-
+    I only fit answer questions about the NAFDAC records and leaflet for this
+    pack wey you scan.
+  fallback_unsupported: >-
+    I no fit check that answer against the sources for this pack, so I no go
+    show am. Abeg ask question wey concern the records or leaflet only.
+  fallback_not_found: >-
+    That information no dey inside the NAFDAC records or the leaflet wey we get
+    for this pack. I no fit guess. Abeg check the pack or ask pharmacist.
+  fallback_no_leaflet: >-
+    We no get leaflet wey we fit read for this pack, so I no fit quote any part
+    of the leaflet.
+  fallback_unknown: >-
+    I no understand that one as question about this pack records or leaflet.
+    Abeg ask about registration details, ingredients, warnings, or wetin the
+    leaflet talk.
+  disclaimer: >-
+    This one come from NAFDAC records and the leaflet wey we get. E no be
+    medical advice.

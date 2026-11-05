@@ -110,15 +110,15 @@ func TestTemplatesAvoidForbiddenWording(t *testing.T) {
 	}
 }
 
-func TestUnreviewedTemplatesAreNotProductionReady(t *testing.T) {
+func TestDefaultTemplatesAreReviewedAndProductionReady(t *testing.T) {
 	catalog, err := LoadTemplates(DefaultLanguage)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if catalog.Reviewed {
-		t.Fatal("this test documents the open review blocker; templates must stay unreviewed until that review happens")
+	if !catalog.Reviewed {
+		t.Fatal("the approved English templates must be marked reviewed")
 	}
-	if err := catalog.ProductionReady(); err == nil {
-		t.Fatal("unreviewed templates must not pass the production gate")
+	if err := catalog.ProductionReady(); err != nil {
+		t.Fatalf("reviewed templates must pass the production gate: %v", err)
 	}
 }

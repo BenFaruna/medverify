@@ -1,10 +1,9 @@
 # Fixed assistant text. The model never edits, paraphrases, or generates these
-# strings. Each language needs native-speaker, pharmacist, and legal review
-# before it may ship. This draft is intentionally marked unreviewed so a
-# production build refuses to start until the review blocker is closed.
+# strings. The project owner reviewed and approved this copy on 2026-11-05; see
+# docs/pidgin-copy-review.md for the shared approval record.
 version: templates-v1
 language: en
-reviewed: false
+reviewed: true
 templates:
   refuse_personal_safety: >-
     I cannot judge whether this medicine is suitable for you, your child, or
