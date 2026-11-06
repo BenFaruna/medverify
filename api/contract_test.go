@@ -44,12 +44,25 @@ func TestSpecIsValid(t *testing.T) {
 	}
 }
 
-// Every authenticated endpoint must document its scope, its rate-limit class,
-// and the error cases a client can hit.
+// credentialFreeV1Operations are the account lifecycle calls a person makes
+// before they hold a credential. They must say so explicitly with
+// `security: []`, so a forgotten security block is never mistaken for a public
+// endpoint. Every other /v1 operation must name a scheme.
+var credentialFreeV1Operations = map[string]bool{
+	"registerAccount": true,
+	"loginAccount":    true,
+	"logoutAccount":   true,
+}
+
+// Every authenticated endpoint must document its credential, its rate-limit
+// class, and the error cases a client can hit. The rules follow the code: a
+// key can be refused for a scope, a cookie-authenticated write for its origin,
+// and a read for neither.
 func TestEveryV1OperationDocumentsAuthAndLimits(t *testing.T) {
 	t.Parallel()
 
 	document := loadSpec(t)
+	seen := make(map[string]bool, len(credentialFreeV1Operations))
 
 	for path, item := range document.Paths.Map() {
 		if !strings.HasPrefix(path, "/v1/") {
@@ -57,21 +70,82 @@ func TestEveryV1OperationDocumentsAuthAndLimits(t *testing.T) {
 		}
 		for method, operation := range item.Operations() {
 			name := method + " " + path
+			if operation.OperationID != "" {
+				seen[operation.OperationID] = true
+			}
 
-			if operation.Security == nil || len(*operation.Security) == 0 {
-				t.Errorf("%s: must declare the API key security scheme", name)
+			public := credentialFreeV1Operations[operation.OperationID]
+			schemes := securitySchemes(t, name, operation, public)
+
+			if !public {
+				if operation.Responses.Status(http.StatusUnauthorized) == nil {
+					t.Errorf("%s: must document 401", name)
+				}
+				// A key without the scope, or a cookie sent by another site on a
+				// write, is a 403. A cookie-authenticated read has neither case.
+				if schemes.hasApiKey || !isRead(method) {
+					if operation.Responses.Status(http.StatusForbidden) == nil {
+						t.Errorf("%s: must document 403", name)
+					}
+				}
 			}
-			if operation.Responses.Status(http.StatusUnauthorized) == nil {
-				t.Errorf("%s: must document 401", name)
-			}
-			if operation.Responses.Status(http.StatusForbidden) == nil {
-				t.Errorf("%s: must document 403 for a missing scope", name)
-			}
+
 			if operation.Responses.Status(http.StatusTooManyRequests) == nil {
-				t.Errorf("%s: must document 429 for rate limits and quotas", name)
+				t.Errorf("%s: must document 429 for the per-address limit", name)
 			}
 		}
 	}
+
+	// A renamed operation must not leave a stale allowlist entry behind: that
+	// would quietly exempt the route that took its ID from these checks.
+	for operationID := range credentialFreeV1Operations {
+		if !seen[operationID] {
+			t.Errorf("credentialFreeV1Operations names %q, which no documented operation uses", operationID)
+		}
+	}
+}
+
+type declaredSchemes struct {
+	hasApiKey  bool
+	hasSession bool
+}
+
+// securitySchemes reads the declared requirements for one operation and checks
+// that each names a scheme the document actually defines.
+func securitySchemes(t *testing.T, name string, operation *openapi3.Operation, public bool) declaredSchemes {
+	t.Helper()
+
+	var declared declaredSchemes
+
+	if public {
+		if operation.Security == nil || len(*operation.Security) != 0 {
+			t.Errorf("%s: a credential-free operation must declare `security: []`", name)
+		}
+		return declared
+	}
+
+	if operation.Security == nil || len(*operation.Security) == 0 {
+		t.Errorf("%s: must declare ApiKeyAuth or SessionCookie", name)
+		return declared
+	}
+
+	for _, requirement := range *operation.Security {
+		for scheme := range requirement {
+			switch scheme {
+			case "ApiKeyAuth":
+				declared.hasApiKey = true
+			case "SessionCookie":
+				declared.hasSession = true
+			default:
+				t.Errorf("%s: documents an unknown security scheme %q", name, scheme)
+			}
+		}
+	}
+	return declared
+}
+
+func isRead(method string) bool {
+	return method == http.MethodGet || method == http.MethodHead
 }
 
 // The public contract must never document a score or a reassurance, on any

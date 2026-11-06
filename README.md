@@ -126,12 +126,20 @@ updated.
 | `GET /v1/account/api-keys` | Key metadata: prefix, scopes, state, timestamps |
 | `POST /v1/account/api-keys/rotate` | Revoke active keys, issue one replacement |
 
-The account routes use a session cookie, not `X-API-Key`, and are mounted
-outside the API-key middleware. The cookie is `HttpOnly`, `SameSite=Lax`, and
-`Secure` in production; cross-site writes are rejected server-side. Sign-in is
-rate limited per address. `AUTH_SESSION_TTL` (default `720h`) bounds how long a
-session lasts. Passwords are stored as PBKDF2-HMAC-SHA256 derives with 600,000
-iterations and a per-account salt.
+The account routes use a session cookie, never `X-API-Key`. The cookie is
+`HttpOnly`, `SameSite=Lax`, and `Secure` in production; cross-site writes are
+rejected server-side. Sign-in is rate limited per address. `AUTH_SESSION_TTL`
+(default `720h`) bounds how long a session lasts. Passwords are stored as
+PBKDF2-HMAC-SHA256 derives with 600,000 iterations and a per-account salt.
+
+The chat page at <http://localhost:8080/> holds no key at all. It calls `/v1`
+with that cookie, and the API accepts either credential on every `/v1` route:
+`X-API-Key` first when present, then the session. A browser session acts with
+the plan on its client row, so the page and the account's key share one rate
+limit and one set of daily counters. A signed-out browser is sent to `/login`
+before the chat renders. The key exists for code the person runs themselves
+(their own script, a CI job), and is never placed in a page, browser storage,
+or a URL.
 
 ### What is running
 
@@ -179,7 +187,8 @@ govulncheck.
 | Symptom | Fix |
 | --- | --- |
 | `make run` ends with "stack did not become ready" | Run `make logs`. Usually a port is already in use, Docker is not running, or the `init` container failed a migration. |
-| `401 unauthorized` from the API | Send `X-API-Key: dev-api-key` (the development-only `API_LEGACY_KEY`), or a key issued with `admin apikey create`. Both are accepted. |
+| `401 unauthorized` from the API | For programmatic calls, send `X-API-Key: dev-api-key` (the development-only `API_LEGACY_KEY`), or a key issued with `admin apikey create` or at registration. In a browser, the session has expired: sign in again. |
+| The chat page bounces to `/login` | That is the gate working. Sign in; the `next` parameter returns you to the page you asked for. |
 | The `api` container exits mentioning `serve web client` | `WEB_DIR` points at a missing directory. Keep the default (the image ships `/app/web`) or set `WEB_DIR=` to serve the API only. |
 | `connection refused` on 5432 or 9000 while running the binaries | Start the containers first: `docker compose up -d postgres storage`. |
 | Integration tests cannot start containers on rootless Docker | `TESTCONTAINERS_RYUK_DISABLED=true make test-integration`. Test containers are still removed by their cleanup hooks. |

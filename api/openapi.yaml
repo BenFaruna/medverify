@@ -9,10 +9,12 @@ info:
     Every error response uses RFC 7807 problem details with a stable `code`
     field; clients branch on `code`, never on `detail`.
 
-    Authentication is a per-client API key sent in `X-API-Key`. Keys carry
-    scopes and per-client rate limits and daily quotas, all enforced server
-    side. Failed attempts are not reported in the body beyond
-    `unauthorized`, so a key cannot be probed for.
+    Programmatic callers authenticate with a per-client API key sent in
+    `X-API-Key`. A browser uses the session cookie set by the account routes
+    instead, so a page never has to hold a key. Both credentials carry scopes
+    and the client's rate limit and daily quotas, all enforced server side.
+    Failed attempts are not reported in the body beyond `unauthorized`, so a
+    key cannot be probed for.
 
     The API never declares a medicine safe, genuine, or authentic, never
     describes one as fake, and never returns a numeric score.
@@ -31,6 +33,11 @@ tags:
     description: Upload pack photos asynchronously and read the result
   - name: assistant
     description: Ask grounded questions about one scanned pack
+  - name: accounts
+    description: |
+      Create an account, sign in, and manage the API key that programmatic
+      clients use. These routes authenticate with a session cookie, never with
+      an API key.
 
 paths:
   /healthz:
@@ -115,6 +122,7 @@ paths:
       tags: [scans]
       security:
         - ApiKeyAuth: []
+        - SessionCookie: []
       parameters:
         - name: Idempotency-Key
           in: header
@@ -234,6 +242,7 @@ paths:
       tags: [scans]
       security:
         - ApiKeyAuth: []
+        - SessionCookie: []
       parameters:
         - name: id
           in: path
@@ -306,6 +315,7 @@ paths:
       tags: [assistant]
       security:
         - ApiKeyAuth: []
+        - SessionCookie: []
       parameters:
         - name: id
           in: path
@@ -421,6 +431,7 @@ paths:
       tags: [assistant]
       security:
         - ApiKeyAuth: []
+        - SessionCookie: []
       parameters:
         - name: id
           in: path
@@ -485,6 +496,276 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+
+  /v1/auth/register:
+    post:
+      operationId: registerAccount
+      summary: Create an account and its first API key
+      description: |
+        Creates a client, an account, the first API key, and a signed-in
+        session in one transaction. The key is returned in this response and
+        nowhere else: only its hash is stored, so it cannot be recovered. The
+        session cookie is set on the same response, so the registration form
+        can hand the person straight to the chat.
+
+        An account is an API client: the key issued here works on
+        `/v1/scans` immediately, with the scopes, rate limit, and daily quotas
+        in the response. An address that already has an account receives 409;
+        sign in instead.
+
+        This route is deliberately unauthenticated, and is rate limited per
+        calling address.
+      tags: [accounts]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: The account, its first key, and a signed-in session.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+            Cache-Control:
+              description: Always `no-store`; the body contains a secret once.
+              schema:
+                type: string
+            Set-Cookie:
+              description: |
+                The `mv_session` cookie, `HttpOnly`, `SameSite=Lax`, and `Secure`
+                over TLS. Its lifetime is the session TTL.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegisterResponse"
+        "400":
+          description: |
+            The body is not one JSON object with the expected fields, or a
+            field failed validation. `detail` names the field for a person to
+            fix.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          $ref: "#/components/responses/CrossSite"
+        "409":
+          description: That email address already has an account.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+              example:
+                type: https://medverify.ng/problems/conflict
+                title: Conflict
+                status: 409
+                detail: That email address already has an account.
+                code: conflict
+        "413":
+          description: The body is larger than the endpoint allows.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/auth/login:
+    post:
+      operationId: loginAccount
+      summary: Sign in and set the session cookie
+      description: |
+        Verifies the password and sets a fresh `mv_session` cookie. Every
+        failure is the same 401: the response never says whether the address
+        exists, so accounts cannot be enumerated.
+
+        Signing in does not rotate or reveal the API key. Read it at the
+        moment it is created, or rotate it from `/v1/account/api-keys/rotate`.
+      tags: [accounts]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Signed in; the response sets the session cookie.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+            Cache-Control:
+              description: Always `no-store`; the body is personal data.
+              schema:
+                type: string
+            Set-Cookie:
+              description: The `mv_session` cookie for this session.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          description: The body is not one JSON object with an email and password.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Email or password is incorrect.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+              example:
+                type: https://medverify.ng/problems/unauthorized
+                title: Unauthorized
+                status: 401
+                detail: Email or password is incorrect.
+                code: unauthorized
+        "403":
+          $ref: "#/components/responses/CrossSite"
+        "413":
+          description: The body is larger than the endpoint allows.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/auth/logout:
+    post:
+      operationId: logoutAccount
+      summary: Revoke the session and clear the cookie
+      description: |
+        Revokes the session row as well as clearing the cookie: clearing alone
+        would leave a copied token valid. Signing out without a session is not
+        an error, so this returns 204 whether or not a session was present.
+
+        No API key is affected. Code that holds a key keeps working, which is
+        the point of keeping the two credentials separate.
+      tags: [accounts]
+      security: []
+      responses:
+        "204":
+          description: Signed out. The cookie is expired in the same response.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+            Set-Cookie:
+              description: The `mv_session` cookie with an expiry in the past.
+              schema:
+                type: string
+        "403":
+          $ref: "#/components/responses/CrossSite"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/account:
+    get:
+      operationId: getAccount
+      summary: Read the signed-in account
+      description: |
+        Returns the account behind the session cookie. The chat page calls this
+        before rendering anything: a 401 means the visitor should be sent to
+        `/login`.
+      tags: [accounts]
+      security:
+        - SessionCookie: []
+      responses:
+        "200":
+          description: The signed-in account.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+            Cache-Control:
+              description: Always `no-store`; the body is personal data.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/account/api-keys:
+    get:
+      operationId: listAPIKeys
+      summary: List the account's API keys
+      description: |
+        Returns every key ever issued to this account, newest first, as
+        metadata only. A prefix is the public half of a key: it identifies the
+        key for rotation and support without authenticating anything. The
+        secret is never included, because only its hash was ever stored.
+      tags: [accounts]
+      security:
+        - SessionCookie: []
+      responses:
+        "200":
+          description: Key metadata, newest first.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+            Cache-Control:
+              description: Always `no-store`.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIKeyListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/account/api-keys/rotate:
+    post:
+      operationId: rotateAPIKey
+      summary: Revoke the active keys and issue a replacement
+      description: |
+        Revokes every active key on the account and inserts one replacement in
+        a single transaction, then returns the new key once. The previous key
+        stops working immediately, so rotation after a leak closes the leak.
+
+        The session cookie is unaffected: the browser stays signed in, which is
+        what makes rotating from the settings page safe. Update every client
+        that holds the old key, because nothing can recover it.
+      tags: [accounts]
+      security:
+        - SessionCookie: []
+      responses:
+        "200":
+          description: The replacement key and how many keys were revoked.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+            Cache-Control:
+              description: Always `no-store`; the body contains a secret once.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RotateResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/CrossSite"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
 components:
   securitySchemes:
     ApiKeyAuth:
@@ -502,6 +783,26 @@ components:
         `403 insufficient_scope`.
 
         Sandbox keys return fixed responses and never call a provider.
+
+        This is the credential for code the person runs themselves. A browser
+        uses `SessionCookie` instead, so the key is never placed in a page.
+    SessionCookie:
+      type: apiKey
+      in: cookie
+      name: mv_session
+      description: |
+        Browser session cookie set by the registration and sign-in responses.
+        It is `HttpOnly` and `SameSite=Lax`, so script cannot read it and
+        another site cannot send it on a write; the server stores only a hash
+        of the token.
+
+        The API accepts it in place of `X-API-Key` for same-origin browser
+        calls. A cookie-authenticated write from another origin is refused
+        with `403 forbidden`. A session acts with the plan on its client row,
+        so it shares that client's rate limit and daily counters with any key
+        issued to the same account.
+
+        Do not send this cookie from server-side code: use `ApiKeyAuth` there.
   headers:
     X-Request-Id:
       description: Correlation ID for this request. Echoed from the client when well formed.
@@ -525,7 +826,10 @@ components:
         example: 12
   responses:
     Unauthorized:
-      description: The X-API-Key header is missing, unknown, revoked, or expired.
+      description: |
+        No credential was accepted: the `X-API-Key` header is missing,
+        unknown, revoked, or expired, and the request carried no valid session
+        cookie either.
       content:
         application/problem+json:
           schema:
@@ -542,6 +846,23 @@ components:
             status: 403
             detail: The API key does not have permission to perform this action.
             code: insufficient_scope
+    CrossSite:
+      description: |-
+        The request carried the session cookie, but the browser reports it came
+        from another site. The check reads the browser's own headers on the
+        server, so it does not rely on `SameSite` being honoured. A
+        key-authenticated request never gets this answer: a browser cannot set
+        `X-API-Key` without an approved CORS preflight.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          example:
+            type: https://medverify.ng/problems/forbidden
+            title: Forbidden
+            status: 403
+            detail: This request came from another site.
+            code: forbidden
     RateLimited:
       description: Too many requests for this key or this calling address.
       headers:
@@ -1255,6 +1576,7 @@ components:
             - bad_request
             - conflict
             - corrupt_image
+            - forbidden
             - image_too_large
             - insufficient_scope
             - internal_error
@@ -1277,3 +1599,172 @@ components:
         detail: "Unavailable dependencies: storage."
         instance: /readyz
         code: unavailable
+
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+          description: The address that signs in. Stored lower-cased and unique.
+        name:
+          type: string
+          maxLength: 100
+          description: Optional display name. The settings page shows it back.
+        password:
+          type: string
+          format: password
+          minLength: 12
+          maxLength: 1024
+          description: |-
+            At least 12 characters. It is stored as a PBKDF2-HMAC-SHA256 hash
+            and never logged, returned, or included in an error.
+
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          type: string
+          format: password
+          maxLength: 1024
+
+    AccountUser:
+      type: object
+      required: [id, email, name, client_id, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+          description: Empty when the person did not give one.
+        client_id:
+          type: integer
+          format: int64
+          description: |-
+            The api_clients row this account scans as. Scans created from the
+            browser and from the account's key belong to the same client.
+        created_at:
+          type: string
+          format: date-time
+        last_login_at:
+          type: string
+          format: date-time
+          description: Omitted when the account has never signed in.
+
+    AccountSession:
+      type: object
+      required: [expires_at]
+      description: |-
+        Describes the session the response already set as a cookie. The token
+        itself is never in a body, so a script cannot read it.
+      properties:
+        expires_at:
+          type: string
+          format: date-time
+
+    APIKeyMetadata:
+      type: object
+      required: [prefix, scopes, state, created_at]
+      properties:
+        prefix:
+          type: string
+          description: |-
+            The public half of the key, shown as `mv_<prefix>`. It identifies
+            the key without authenticating anything.
+          example: mv_3f9c1a2b4d5e
+        scopes:
+          type: array
+          items:
+            type: string
+          example: [scans:write, scans:read, questions:write]
+        state:
+          type: string
+          enum: [active, revoked, expired, inactive]
+          description: One word derived from the key's timestamps.
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+          description: Omitted when the key has never been used.
+        expires_at:
+          type: string
+          format: date-time
+          description: Omitted when the key does not expire.
+
+    IssuedAPIKey:
+      allOf:
+        - $ref: "#/components/schemas/APIKeyMetadata"
+        - type: object
+          required: [key]
+          properties:
+            key:
+              type: string
+              description: |-
+                The full key. This is the only response that ever contains it:
+                the server stores a SHA-256 hash, so it cannot be shown again.
+              writeOnly: false
+              example: mv_3f9c1a2b4d5e_9a1c4f8b7d2e5a0c3b6d9e2f5a8c1b4d
+
+    RegisterResponse:
+      type: object
+      required: [user, session, api_key]
+      properties:
+        user:
+          $ref: "#/components/schemas/AccountUser"
+        session:
+          $ref: "#/components/schemas/AccountSession"
+        api_key:
+          $ref: "#/components/schemas/IssuedAPIKey"
+
+    LoginResponse:
+      type: object
+      required: [user, session]
+      properties:
+        user:
+          $ref: "#/components/schemas/AccountUser"
+        session:
+          $ref: "#/components/schemas/AccountSession"
+
+    AccountResponse:
+      type: object
+      required: [user]
+      properties:
+        user:
+          $ref: "#/components/schemas/AccountUser"
+
+    APIKeyListResponse:
+      type: object
+      required: [api_keys]
+      properties:
+        api_keys:
+          type: array
+          description: Newest first. Never carries a secret.
+          items:
+            $ref: "#/components/schemas/APIKeyMetadata"
+
+    RotateResponse:
+      type: object
+      required: [api_key, revoked]
+      properties:
+        api_key:
+          $ref: "#/components/schemas/IssuedAPIKey"
+        revoked:
+          type: integer
+          format: int64
+          minimum: 0
+          description: How many keys the rotation revoked. Zero means none was active.

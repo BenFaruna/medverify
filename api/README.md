@@ -56,9 +56,11 @@ a clean checkout serves them directly.
 
 ## Quickstart
 
-Every request needs a key in `X-API-Key`. The key format is
+Programmatic requests need a key in `X-API-Key`. The key format is
 `mv_<prefix>_<secret>`; the server looks it up by prefix and compares a SHA-256
-hash of the full value in constant time, so only the hash is stored.
+hash of the full value in constant time, so only the hash is stored. A browser
+uses the session cookie set by `POST /v1/auth/login` instead, and never holds a
+key; see [Authentication and scopes](#authentication-and-scopes).
 
 ```bash
 export MEDVERIFY_KEY="mv_...your key..."
@@ -124,11 +126,47 @@ missing, unknown, revoked, or expired key gets `401 unauthorized`, with no
 detail about which case it was.
 
 In development the server also accepts the shared `API_LEGACY_KEY`
-(`dev-api-key` by default) as a convenience for the bundled web page and the
-quickstart. Database-backed keys are checked first and work at the same time, so
-a key from `admin apikey create` can be used in the web client or Swagger UI
-without changing that setting. Production rejects a non-empty `API_LEGACY_KEY`
-at startup.
+(`dev-api-key` by default) for the quickstart. Database-backed keys are checked
+first and work at the same time. The bundled web page does **not** use it: the
+page signs in and sends the session cookie, so no key lives in its source or
+its storage. Production rejects a non-empty `API_LEGACY_KEY` at startup.
+
+### Two credentials, one client
+
+| Caller | Sends | Why |
+| --- | --- | --- |
+| A person in the bundled web client | `mv_session` cookie | `HttpOnly`, `SameSite=Lax`; script cannot read it and another site cannot send it on a write |
+| Their own code, a CI job, an integration | `X-API-Key` | A long-lived secret the caller controls and can rotate |
+| Anyone in Swagger UI at `/docs` | `X-API-Key` via **Authorize** | The UI is served from this origin, but a key is the documented credential for scripted calls |
+
+Both credentials resolve to the same `api_clients` row, so they share scopes,
+rate limit, and daily quotas. `X-API-Key` wins when both are present, so an
+integration's plan always comes from its own key. A cookie-authenticated write
+from another origin returns `403 forbidden`; a key request needs no such check
+because a browser cannot set the header without an approved CORS preflight.
+
+An account is created at registration, and the first key comes back in the same
+response:
+
+```bash
+curl -sS -X POST http://localhost:8080/v1/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"ada@example.test","name":"Ada","password":"a-long-enough-password"}'
+# 201 with user, session.expires_at, and api_key.key — the only time the key is shown
+```
+
+| Account endpoint | Credential | Purpose |
+| --- | --- | --- |
+| `POST /v1/auth/register` | none | Create the account, its first key, and a session |
+| `POST /v1/auth/login` | none | Start a session |
+| `POST /v1/auth/logout` | none | Revoke the session and clear the cookie |
+| `GET /v1/account` | session cookie | The signed-in account |
+| `GET /v1/account/api-keys` | session cookie | Key metadata: prefix, scopes, state, timestamps |
+| `POST /v1/account/api-keys/rotate` | session cookie | Revoke active keys, issue one replacement |
+
+Every one of these is documented in `openapi.yaml`, and
+`TestEveryV1RouteIsDocumented` fails the build if a route is added without an
+operation or a documented operation loses its route.
 
 Keys are per client. One client cannot read another client's scans: a scan that
 belongs to someone else is reported as `404`, exactly like a scan that does not
