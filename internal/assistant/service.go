@@ -272,9 +272,17 @@ func (s *Service) Ask(ctx context.Context, request AskRequest) (AnswerView, erro
 		return AnswerView{}, err
 	}
 	// A malformed route can only use the unknown row, even if the model also
-	// returned an intent string.
+	// returned an intent string. It is logged because an unusable route nearly
+	// always means the router model returned nothing — a fake provider, a
+	// missing key, a model that ignores the forced tool — and the person would
+	// otherwise be told their question was not understood.
 	if route.Malformed {
 		route.Intent = IntentUnknown
+		s.logger.WarnContext(ctx, "assistant router returned no usable route; answering with the unknown fallback",
+			slog.String("scan_id", scanned.ID.String()),
+			slog.String("language", route.Language),
+			slog.String("prompt_version", PromptVersion),
+		)
 	}
 	row := DefaultPolicy().Decide(route.Intent)
 	catalog, err := s.catalog(route.Language)

@@ -294,6 +294,14 @@ identifiers must be pinned: a floating alias is accepted by the provider but not
 by review. A `VISION_FALLBACK_MODEL` of the same provider is tried only when the
 primary is unavailable, never when an image is unreadable.
 
+The `fake` provider answers nothing: every question reaches the router as an
+empty response and comes back as the "I did not understand" fallback. That is
+correct for tests and confusing anywhere else, so the API logs a warning at
+startup naming the variables to set, and logs again whenever the router returns
+no usable route. The compose stack passes the whole `ASSISTANT_*` block through
+from `.env`, so a provider configured for a host process works in the containers
+too.
+
 ## Operations
 
 Health checks, kill switches, retention and erasure commands, API-key rotation,

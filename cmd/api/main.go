@@ -215,6 +215,15 @@ func buildAssistant(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, 
 		catalogs[strings.ToLower(language)] = catalog
 	}
 
+	// The fake provider returns an empty response for every call, which the
+	// router can only read as a question it did not understand. Say so at
+	// startup, otherwise a missing provider setting looks like a user asking
+	// badly rather than a stack with no model behind it.
+	if cfg.Assistant.Provider == "fake" {
+		logger.Warn("assistant is using the fake model: every question gets a fixed fallback, never an answer",
+			slog.String("fix", "set ASSISTANT_LLM_PROVIDER, ASSISTANT_MODEL, ASSISTANT_SMALL_MODEL, and ASSISTANT_API_KEY"))
+	}
+
 	strongModel := cfg.Assistant.Model
 	smallModel := cfg.Assistant.SmallModel
 	if smallModel == "" {
