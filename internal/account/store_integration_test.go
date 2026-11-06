@@ -160,3 +160,36 @@ func TestLoginVerifiesTheStoredPassword(t *testing.T) {
 	_, _, err = service.Login(ctx, "nobody@example.test", password)
 	assert.ErrorIs(t, err, account.ErrInvalidCredentials)
 }
+
+// The browser's principal is built from the client row rather than from a key,
+// so the plan lookup has to work against the real schema: a session with no
+// plan would silently fall back to the middleware defaults instead of the
+// account's own limits.
+func TestSessionAccessCarriesTheClientPlan(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	_, service := newFixture(t)
+
+	registration, err := service.Register(ctx, account.RegisterInput{
+		Email:    "ada@example.test",
+		Password: "a-long-enough-password",
+	})
+	require.NoError(t, err)
+
+	user, principal, err := service.Access(ctx, registration.Session.Token)
+	require.NoError(t, err)
+
+	assert.Equal(t, registration.User.ClientID, user.ClientID)
+	assert.Equal(t, registration.User.ClientID, principal.ClientID)
+	assert.Equal(t, auth.AllScopes, principal.Scopes)
+	assert.Equal(t, int32(60), principal.RatePerMin)
+	assert.Equal(t, int32(10000), principal.DailyRequestQuota)
+	assert.Equal(t, int32(200), principal.DailyScanQuota)
+	assert.False(t, principal.Sandbox)
+
+	// A token that was never issued resolves to no account, not to an anonymous
+	// one, so the caller can turn it into a 401.
+	_, _, err = service.Access(ctx, "not-a-real-token")
+	assert.ErrorIs(t, err, account.ErrNoSession)
+}
