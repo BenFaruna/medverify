@@ -25,17 +25,16 @@ in "I did not understand that".
 
 - **English:** revised and approved by the project owner on 2026-11-06. The
   production gate still passes for `en`.
-- **Pidgin:** redrafted on 2026-11-06 to mirror the English, and **awaiting the
-  owner's confirmation of this wording**:
+- **Pidgin:** revised and approved by the project owner on 2026-11-06, in this
+  wording:
 
   > We never get leaflet wey we fit read for this pack yet, so I no fit quote
   > any part of the leaflet. I don ask make dem download the leaflet come read
   > am; if NAFDAC publish one, the link go dey join this answer. Abeg ask me
   > again small time.
 
-  `reviewed: true` is left in place because every other line in the catalog is
-  unchanged and approved; if this line is reworded, the catalog needs a fresh
-  review before it ships.
+  Both catalogs keep `reviewed: true`, so the production gate and the Pidgin
+  suppression tests pass unchanged.
 
 ## Out of scope
 

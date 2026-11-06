@@ -1,8 +1,7 @@
 # Fixed assistant text in Nigerian Pidgin (ISO 639-3: pcm). The model never
 # edits, paraphrases, or generates these strings. The project owner reviewed and
-# approved this copy on 2026-11-05. The leaflet fallback was redrafted on
-# 2026-11-06 and awaits the owner's confirmation; see
-# docs/pidgin-copy-review.md.
+# approved this copy on 2026-11-05 and approved the revised leaflet fallback on
+# 2026-11-06; see docs/pidgin-copy-review.md.
 version: templates-v1
 language: pcm
 reviewed: true
