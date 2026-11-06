@@ -1,6 +1,8 @@
 # Fixed assistant text in Nigerian Pidgin (ISO 639-3: pcm). The model never
 # edits, paraphrases, or generates these strings. The project owner reviewed and
-# approved this copy on 2026-11-05; see docs/pidgin-copy-review.md.
+# approved this copy on 2026-11-05. The leaflet fallback was redrafted on
+# 2026-11-06 and awaits the owner's confirmation; see
+# docs/pidgin-copy-review.md.
 version: templates-v1
 language: pcm
 reviewed: true
@@ -35,8 +37,10 @@ templates:
     That information no dey inside the NAFDAC records or the leaflet wey we get
     for this pack. I no fit guess. Abeg check the pack or ask pharmacist.
   fallback_no_leaflet: >-
-    We no get leaflet wey we fit read for this pack, so I no fit quote any part
-    of the leaflet.
+    We never get leaflet wey we fit read for this pack yet, so I no fit quote
+    any part of the leaflet. I don ask make dem download the leaflet come read
+    am; if NAFDAC publish one, the link go dey join this answer. Abeg ask me
+    again small time.
   fallback_unknown: >-
     I no understand that one as question about this pack records or leaflet.
     Abeg ask about registration details, ingredients, warnings, or wetin the

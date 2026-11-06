@@ -17,6 +17,26 @@ Pidgin fixed text.
 The approval covers the copy as written in those files. Any later wording change
 needs a new review before it ships.
 
+## Leaflet fallback revision (2026-11-06)
+
+`fallback_no_leaflet` changed in both catalogs when a question about a leaflet
+that is not stored yet started to queue a background download instead of ending
+in "I did not understand that".
+
+- **English:** revised and approved by the project owner on 2026-11-06. The
+  production gate still passes for `en`.
+- **Pidgin:** redrafted on 2026-11-06 to mirror the English, and **awaiting the
+  owner's confirmation of this wording**:
+
+  > We never get leaflet wey we fit read for this pack yet, so I no fit quote
+  > any part of the leaflet. I don ask make dem download the leaflet come read
+  > am; if NAFDAC publish one, the link go dey join this answer. Abeg ask me
+  > again small time.
+
+  `reviewed: true` is left in place because every other line in the catalog is
+  unchanged and approved; if this line is reworded, the catalog needs a fresh
+  review before it ships.
+
 ## Out of scope
 
 Verdict reason sentences and safety flag wording still come from the English
