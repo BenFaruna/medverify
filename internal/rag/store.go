@@ -64,6 +64,15 @@ func (s LeafletStatus) Readable() bool {
 // Known reports whether any leaflet location is on file, fetched or not.
 func (s LeafletStatus) Known() bool { return s.Link() != "" }
 
+// Refetchable reports whether downloading the leaflet again could change what is
+// on file: there is no document row yet, or the last attempt failed. A leaflet
+// that is stored but has no text layer (a scan), or is too large, would come
+// back byte for byte the same, so a question must not start another download of
+// it.
+func (s LeafletStatus) Refetchable() bool {
+	return s.DocumentStatus == "" || s.DocumentStatus == "failed"
+}
+
 // Link returns the best URL to show a person, preferring the document row over
 // the product record's column because the document row is what was fetched.
 func (s LeafletStatus) Link() string {

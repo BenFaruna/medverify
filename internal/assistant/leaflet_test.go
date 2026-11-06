@@ -174,6 +174,59 @@ func TestAskQuotesAReadableLeafletWithoutQueueingAFetch(t *testing.T) {
 	}
 }
 
+// A leaflet that was downloaded but has no text layer is not going to gain one by
+// being downloaded again, so the fixed answer must not queue a second fetch.
+func TestAskDoesNotRedownloadAScannedLeaflet(t *testing.T) {
+	t.Parallel()
+
+	const link = "https://admin.greenbook.nafdac.gov.ng/leaflets/04-0858.pdf"
+	leaflets := &fakeLeaflets{found: true, status: rag.LeafletStatus{
+		ProductID: 42, URL: link, DocumentID: 9, DocumentURL: link,
+		DocumentStatus: "scanned_needs_ocr", Chunks: 0,
+	}}
+	fetches := &fakeFetches{}
+	client := llm.NewFake(routeResponse("leaflet"))
+	service, _, scans := newLeafletService(t, client, leaflets, fetches, &fakeSearcher{}, nil)
+
+	answer, err := service.Ask(context.Background(), AskRequest{
+		ScanID: scans.scanned.ID, ClientKey: "client", Question: "What does the leaflet say?",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !answer.Fallback || answer.Intent != IntentLeaflet {
+		t.Fatalf("view = %#v", answer)
+	}
+	if len(fetches.products) != 0 {
+		t.Fatalf("queued fetches = %v; a stored scan must not be downloaded again", fetches.products)
+	}
+}
+
+// A download that failed is the one case asking again can fix, so the question
+// queues the fetch that the previous attempt never managed to complete.
+func TestAskRetriesAFailedLeafletDownload(t *testing.T) {
+	t.Parallel()
+
+	const link = "https://admin.greenbook.nafdac.gov.ng/leaflets/04-0858.pdf"
+	leaflets := &fakeLeaflets{found: true, status: rag.LeafletStatus{
+		ProductID: 42, URL: link, DocumentID: 9, DocumentURL: link,
+		DocumentStatus: "failed", Chunks: 0,
+	}}
+	fetches := &fakeFetches{}
+	client := llm.NewFake(routeResponse("leaflet"))
+	service, _, scans := newLeafletService(t, client, leaflets, fetches, &fakeSearcher{}, nil)
+
+	_, err := service.Ask(context.Background(), AskRequest{
+		ScanID: scans.scanned.ID, ClientKey: "client", Question: "What does the leaflet say?",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fetches.products) != 1 || fetches.products[0] != 42 {
+		t.Fatalf("queued fetches = %v; a failed download must be retried", fetches.products)
+	}
+}
+
 // A readable leaflet that simply has no passage for the question still gives the
 // person a way to read it: the fixed not-found text arrives with the link.
 func TestAskKeepsTheLeafletLinkWhenNoPassageMatches(t *testing.T) {

@@ -506,6 +506,12 @@ func (s *Service) ensureLeaflet(ctx context.Context, session Session) {
 	if s.fetches == nil || session.ProductID <= 0 {
 		return
 	}
+	// Only a leaflet with nowhere to download from, or one whose last download
+	// failed, can be improved by asking again. Without this, every question
+	// about a scanned or oversized leaflet queued another identical download.
+	if !session.Leaflet.Known() || !session.Leaflet.Refetchable() {
+		return
+	}
 	if err := s.fetches.EnsureLeaflet(ctx, session.ProductID); err != nil {
 		s.logger.WarnContext(ctx, "could not queue a leaflet fetch",
 			slog.Int64("product_id", session.ProductID),

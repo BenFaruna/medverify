@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 
 	"github.com/benfaruna/medverify/internal/registry"
 )
@@ -126,7 +127,20 @@ func (e *LeafletEnqueuer) EnsureLeaflet(ctx context.Context, productID int64) er
 	}
 	_, err := e.Client.Insert(ctx,
 		LeafletFetchArgs{ProductID: productID, Trigger: "question"},
-		&river.InsertOpts{UniqueOpts: river.UniqueOpts{ByArgs: true}},
+		&river.InsertOpts{UniqueOpts: river.UniqueOpts{
+			ByArgs: true,
+			// Completed jobs are left out on purpose. River's default state set
+			// includes them, so the finished row from a failed download blocked
+			// every later request for the same pack until the cleaner removed
+			// it: a question could never retry a leaflet that had gone wrong.
+			ByState: []rivertype.JobState{
+				rivertype.JobStateAvailable,
+				rivertype.JobStatePending,
+				rivertype.JobStateRunning,
+				rivertype.JobStateRetryable,
+				rivertype.JobStateScheduled,
+			},
+		}},
 	)
 	if err != nil {
 		return fmt.Errorf("enqueue leaflet fetch for product %d: %w", productID, err)
