@@ -256,6 +256,15 @@ tested for cross-product and cross-model leaks. There is no labelled retrieval
 eval set yet, so recall has not been measured. See the
 [phase 8 notes](docs/phases/MedVerify%20NG%20-%2008%20Leaflet%20Indexing%20(RAG).md#11-blockers-and-open-items).
 
+Questions about a pack are answered from those passages and the registry record,
+with a citation on every claim. A question that names the leaflet is never
+reported as one the assistant did not understand: when the leaflet is stored and
+indexed the answer quotes it and carries its NAFDAC link, and when it is not, the
+answer says so, still lists the link when one is published, and queues a
+`leaflet_fetch` job that downloads, extracts, and re-indexes it in the
+background. A pack with no confirmed record gets the not-found text instead,
+because there is no leaflet to fetch.
+
 The phase 2 live-ingestion acceptance run, the consented 100+ photo extraction
 eval set, the live provider acceptance run, the data-handling decision, and the
 written NAFDAC data-sharing agreement are still open; see the

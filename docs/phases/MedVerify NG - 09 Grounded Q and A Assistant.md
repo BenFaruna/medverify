@@ -162,7 +162,9 @@ type Tool interface {
   `search_leaflet` take their scan/product scope from the server-side session.
   Any `product_id`, `nrn`, or `scan_id` supplied by the model is ignored. Absence
   of a safety flag or an unindexed leaflet is reported as `found: false`, never
-  as a clean bill of health.
+  as a clean bill of health. `search_leaflet` distinguishes `no_registry_product`,
+  `leaflet_not_readable`, and `no_match`, so the model cannot describe a leaflet
+  it has not read as one that lacks a topic.
 - **Orchestrator.** The loop enforces step, output-token, and tool-call limits
   in code. `submit_answer` is the only terminal action; plain text, malformed
   JSON, or an exhausted limit returns a fixed fallback. Provider errors surface
@@ -177,6 +179,18 @@ type Tool interface {
   content. Malformed output, an unknown intent, or an unsupported language
   resolves to the safest row. The question is delimited as data and never
   copied into the tool call.
+- **Leaflet questions.** A question that names the leaflet ("leaflet", "pack
+  insert", "patient information", "PIL", "SmPC") is routed to the leaflet row
+  even when classification returned nothing usable. That promotion only applies
+  to an unclassified question, so a model-classified refusal stays a refusal.
+  The service reads the leaflet state once per turn (`rag.LeafletStatus`): a
+  leaflet that is readable is quoted through `search_leaflet`, and every leaflet
+  answer carries a `leaflet_document` citation with the NAFDAC URL. When no
+  readable leaflet is stored, the orchestrator is not called at all: the fixed
+  `fallback_no_leaflet` text is returned with that link, and a `leaflet_fetch`
+  job downloads, extracts, and re-indexes the leaflet in the background. A pack
+  with no confirmed registry record gets `fallback_not_found` instead, because
+  there is no URL to fetch and the missing record is the real gap.
 - **HTTP.** `POST /v1/scans/{id}/questions` and
   `GET /v1/scans/{id}/conversation` are scoped to the scan and the API client
   key. Questions are stored for review but never logged. Refusals and fallbacks
