@@ -274,15 +274,23 @@ func leafletDocumentCitation(status rag.LeafletStatus) (Citation, bool) {
 
 func (t *Toolbox) searchLeaflet(ctx context.Context, row PolicyRow, session Session, args json.RawMessage) (ToolResult, error) {
 	result := ToolResult{Name: ToolSearchLeaflet}
+	// The document's own source id has to travel with the result. The system
+	// prompt tells the model to cite the leaflet document when it gives a link,
+	// and without the id here the model could only guess at it: an answer to
+	// "where can I read the leaflet" cited a name that no citation owned and was
+	// thrown away as an unknown source.
+	documentSourceID := ""
 	if citation, ok := leafletDocumentCitation(session.Leaflet); ok {
 		result.Citations = append(result.Citations, citation)
+		documentSourceID = citation.ID
 	}
 	if t.Searcher == nil || session.ProductID <= 0 {
 		result.Content = mustJSON(map[string]any{
-			"found":        false,
-			"reason":       "no_registry_product",
-			"note":         "the scan has no confirmed registry record, so no leaflet can be looked up",
-			"document_url": session.Leaflet.Link(),
+			"found":              false,
+			"reason":             "no_registry_product",
+			"note":               "the scan has no confirmed registry record, so no leaflet can be looked up",
+			"document_url":       session.Leaflet.Link(),
+			"document_source_id": documentSourceID,
 		})
 		return result, nil
 	}
@@ -329,11 +337,12 @@ func (t *Toolbox) searchLeaflet(ctx context.Context, row PolicyRow, session Sess
 			reason, note = "leaflet_not_readable", "the leaflet for this pack is not readable yet, so no passage can be quoted"
 		}
 		result.Content = mustJSON(map[string]any{
-			"found":          false,
-			"reason":         reason,
-			"note":           note,
-			"document_url":   session.Leaflet.Link(),
-			"document_state": session.Leaflet.DocumentStatus,
+			"found":              false,
+			"reason":             reason,
+			"note":               note,
+			"document_url":       session.Leaflet.Link(),
+			"document_source_id": documentSourceID,
+			"document_state":     session.Leaflet.DocumentStatus,
 		})
 		return result, nil
 	}
@@ -361,9 +370,10 @@ func (t *Toolbox) searchLeaflet(ctx context.Context, row PolicyRow, session Sess
 		})
 	}
 	result.Content = mustJSON(map[string]any{
-		"found":        true,
-		"passages":     passages,
-		"document_url": session.Leaflet.Link(),
+		"found":              true,
+		"passages":           passages,
+		"document_url":       session.Leaflet.Link(),
+		"document_source_id": documentSourceID,
 	})
 	return result, nil
 }

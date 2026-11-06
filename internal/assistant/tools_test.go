@@ -224,9 +224,10 @@ func TestSearchLeafletCarriesTheDocumentAndSaysWhyNothingWasFound(t *testing.T) 
 		}
 
 		var content struct {
-			Found       bool   `json:"found"`
-			Reason      string `json:"reason"`
-			DocumentURL string `json:"document_url"`
+			Found            bool   `json:"found"`
+			Reason           string `json:"reason"`
+			DocumentURL      string `json:"document_url"`
+			DocumentSourceID string `json:"document_source_id"`
 		}
 		if err := json.Unmarshal([]byte(result.Content), &content); err != nil {
 			t.Fatalf("%s: %v", tc.name, err)
@@ -243,6 +244,53 @@ func TestSearchLeafletCarriesTheDocumentAndSaysWhyNothingWasFound(t *testing.T) 
 		if citation.Kind != "leaflet_document" || citation.URL != link {
 			t.Fatalf("%s: citation = %#v", tc.name, citation)
 		}
+		// The model is told to cite this id when it gives the link, so the tool
+		// has to hand the id over: naming the kind instead fails verification as
+		// an unknown source.
+		if content.DocumentSourceID != citation.ID {
+			t.Fatalf("%s: document_source_id = %q, citation id = %q", tc.name, content.DocumentSourceID, citation.ID)
+		}
+	}
+}
+
+// A passage answer also carries the document id, so a model that gives the link
+// alongside a quote cites an id the verifier knows.
+func TestSearchLeafletNamesTheDocumentSourceBesideItsPassages(t *testing.T) {
+	t.Parallel()
+
+	const link = "https://admin.greenbook.nafdac.gov.ng/leaflets/04-0858.pdf"
+	session := testSession()
+	session.Leaflet = rag.LeafletStatus{
+		ProductID: 42, URL: link, DocumentID: 100, DocumentURL: link,
+		DocumentStatus: "ok", Chunks: 4,
+	}
+	result, err := NewToolbox(&fakeSearcher{hits: []rag.Hit{{
+		ChunkID: 1391, SectionCode: "4.4", Heading: "Warnings",
+		Text: "Keep out of reach of children.", SourceURL: link,
+	}}}).Call(
+		context.Background(), DefaultPolicy().Decide(IntentLeaflet), session, ToolSearchLeaflet,
+		json.RawMessage(`{"query":"warnings"}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var content struct {
+		DocumentSourceID string `json:"document_source_id"`
+	}
+	if err := json.Unmarshal([]byte(result.Content), &content); err != nil {
+		t.Fatal(err)
+	}
+	if content.DocumentSourceID != "leaflet:document:100" {
+		t.Fatalf("document_source_id = %q; content = %s", content.DocumentSourceID, result.Content)
+	}
+	found := false
+	for _, citation := range result.Citations {
+		if citation.ID == content.DocumentSourceID && citation.URL == link {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("citations = %#v; the document id must be verifiable", result.Citations)
 	}
 }
 
