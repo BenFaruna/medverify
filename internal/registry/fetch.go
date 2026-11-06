@@ -32,6 +32,11 @@ var (
 	ErrTooLarge = errors.New("response exceeds the configured size limit")
 )
 
+// DefaultLeafletTimeout bounds one leaflet download when none is configured. A
+// 200 KB leaflet over a slow link takes seconds, not milliseconds, and the page
+// timeout is far too tight for it.
+const DefaultLeafletTimeout = 2 * time.Minute
+
 // HTTPError is a response the fetcher will not retry or could not retry.
 type HTTPError struct {
 	URL        string
@@ -106,6 +111,9 @@ func NewFetcher(cfg config.Greenbook, logger *slog.Logger, opts ...FetcherOption
 	}
 	if cfg.RequestsPerSecond <= 0 {
 		return nil, fmt.Errorf("greenbook requests per second must be positive")
+	}
+	if cfg.LeafletTimeout <= 0 {
+		cfg.LeafletTimeout = DefaultLeafletTimeout
 	}
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
@@ -197,7 +205,9 @@ func (f *Fetcher) FetchLeaflet(ctx context.Context, rawURL string) (*Leaflet, er
 		return nil, fmt.Errorf("%w: %s", ErrDisallowedHost, host)
 	}
 
-	resp, err := f.do(ctx, rawURL, "application/pdf")
+	// The whole PDF body is read under this budget, so it is much larger than a
+	// page request's: a leaflet is a document, not a list row.
+	resp, err := f.do(ctx, rawURL, "application/pdf", f.cfg.LeafletTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +270,7 @@ var pageColumns = []string{
 }
 
 func (f *Fetcher) get(ctx context.Context, rawURL, accept string, maxBytes int64) ([]byte, error) {
-	resp, err := f.do(ctx, rawURL, accept)
+	resp, err := f.do(ctx, rawURL, accept, f.cfg.RequestTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +290,10 @@ func (f *Fetcher) get(ctx context.Context, rawURL, accept string, maxBytes int64
 }
 
 // do executes one logical request with retries for network errors and 5xx.
-func (f *Fetcher) do(ctx context.Context, rawURL, accept string) (*http.Response, error) {
+func (f *Fetcher) do(ctx context.Context, rawURL, accept string, timeout time.Duration) (*http.Response, error) {
+	if timeout <= 0 {
+		timeout = f.cfg.RequestTimeout
+	}
 	attempts := f.cfg.Retries + 1
 	if attempts < 1 {
 		attempts = 1
@@ -295,7 +308,7 @@ func (f *Fetcher) do(ctx context.Context, rawURL, accept string) (*http.Response
 			return nil, fmt.Errorf("wait for greenbook rate limiter: %w", err)
 		}
 
-		attemptCtx, cancel := context.WithTimeout(ctx, f.cfg.RequestTimeout)
+		attemptCtx, cancel := context.WithTimeout(ctx, timeout)
 		req, err := http.NewRequestWithContext(attemptCtx, http.MethodGet, rawURL, nil)
 		if err != nil {
 			cancel()
@@ -322,8 +335,10 @@ func (f *Fetcher) do(ctx context.Context, rawURL, accept string) (*http.Response
 		}
 
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			// Tie the response body's lifetime to the caller's context, not the
-			// per-attempt timeout: large PDFs may take longer than the head.
+			// The body stays under the request's own deadline: net/http cancels a
+			// read when the request context is done, so the only way to give a PDF
+			// time to arrive is to ask for that time here. cancel still runs when
+			// the body is closed, which is why every caller closes it.
 			resp.Body = &cancelOnClose{ReadCloser: resp.Body, cancel: cancel}
 			return resp, nil
 		}

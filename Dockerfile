@@ -20,7 +20,10 @@ RUN set -eux; \
 # small; all binaries are static.
 FROM alpine:3.22
 
-RUN apk add --no-cache ca-certificates wget \
+# poppler-utils carries pdftotext and pdfinfo, which the leaflet pipeline runs to
+# read a PDF's text layer and count its pages. Without them every leaflet fetch
+# that happens inside a container fails at the first step.
+RUN apk add --no-cache ca-certificates wget poppler-utils \
     && addgroup -g 10001 medverify \
     && adduser -D -u 10001 -G medverify medverify
 

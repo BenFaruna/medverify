@@ -155,13 +155,17 @@ type Jobs struct {
 // Greenbook holds the NAFDAC Greenbook ingestion settings. The kill switch is
 // Enabled=false: the fetcher refuses every outbound call, including retries.
 type Greenbook struct {
-	Enabled                       bool
-	BaseURL                       string
-	UserAgent                     string
-	RequestsPerSecond             float64
-	MaxConcurrency                int
-	PageSize                      int
-	RequestTimeout                time.Duration
+	Enabled           bool
+	BaseURL           string
+	UserAgent         string
+	RequestsPerSecond float64
+	MaxConcurrency    int
+	PageSize          int
+	RequestTimeout    time.Duration
+	// LeafletTimeout bounds a leaflet download, headers and body together. A PDF
+	// is orders of magnitude larger than the JSON pages the rest of the client
+	// reads, so it cannot share RequestTimeout and still finish on a slow link.
+	LeafletTimeout                time.Duration
 	Retries                       int
 	CacheDir                      string
 	CacheTTL                      time.Duration
@@ -370,6 +374,7 @@ func LoadFrom(environ []string) (Config, error) {
 			MaxConcurrency:                l.positiveInt("GREENBOOK_MAX_CONCURRENCY", 2),
 			PageSize:                      l.positiveInt("GREENBOOK_PAGE_SIZE", 100),
 			RequestTimeout:                l.duration("GREENBOOK_REQUEST_TIMEOUT", 30*time.Second),
+			LeafletTimeout:                l.duration("GREENBOOK_LEAFLET_TIMEOUT", 2*time.Minute),
 			Retries:                       l.nonNegativeInt("GREENBOOK_RETRIES", 3),
 			CacheDir:                      l.str("GREENBOOK_CACHE_DIR", filepath.Join(os.TempDir(), "medverify-greenbook-cache")),
 			CacheTTL:                      l.duration("GREENBOOK_CACHE_TTL", time.Hour),
