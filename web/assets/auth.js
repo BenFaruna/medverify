@@ -76,6 +76,15 @@ function showError(node, message) {
   node.hidden = !message;
 }
 
+// nextAfterSignIn returns the page to open once the session exists. Only a
+// same-origin path is accepted: honouring an absolute URL would turn the
+// sign-in page into an open redirect that lends our domain to someone else.
+function nextAfterSignIn() {
+  const raw = new URLSearchParams(window.location.search).get("next");
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "/settings";
+  return raw;
+}
+
 function formatDate(value) {
   if (!value) return "—";
   const date = new Date(value);
@@ -159,7 +168,7 @@ function initLogin() {
         body: JSON.stringify({ email, password }),
       });
       await inFlight;
-      window.location.assign("/settings");
+      window.location.assign(nextAfterSignIn());
     } catch (error) {
       showError(errorNode, describeError(error));
       document.getElementById("password").select();
@@ -168,6 +177,12 @@ function initLogin() {
       setBusy(submit, false);
     }
   });
+
+  // Already signed in, perhaps after a redirect from a chat page: skip the
+  // form entirely. A failure here is the ordinary signed-out case.
+  api("/v1/account")
+    .then(() => window.location.replace(nextAfterSignIn()))
+    .catch(() => {});
 
   document.getElementById("email")?.focus();
 }
@@ -339,7 +354,7 @@ function initSettings() {
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         // A session that expired while the tab sat open is not an error page.
-        window.location.replace("/login");
+        window.location.replace("/login?next=%2Fsettings");
         return;
       }
       loading.hidden = true;

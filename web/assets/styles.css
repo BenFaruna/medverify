@@ -132,6 +132,27 @@ body {
 
 /* --- App frame ---------------------------------------------------------- */
 
+/* The session gate hides the frame until the API confirms a sign-in. This
+   rule is needed because an author display declaration outranks the browser's
+   own [hidden] rule. */
+.app[hidden] {
+  display: none;
+}
+
+.session-check {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem;
+  color: var(--ink-muted);
+  font-size: 0.9375rem;
+}
+
+.key-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 .app {
   display: flex;
   flex-direction: column;

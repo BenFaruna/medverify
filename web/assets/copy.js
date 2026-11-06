@@ -17,7 +17,6 @@ export const COPY = {
     settings: "Settings",
     resultLanguage: "Result language",
     languageHintReady: "English and Pidgin are available.",
-    apiAddress: "API address",
 
     notice:
       "This tool compares the pack photo with NAFDAC records. It is not medical advice. Ask a pharmacist or doctor about your medicine.",
@@ -59,7 +58,6 @@ export const COPY = {
     errorInvalidLanguage: "That language is not supported.",
     errorUnavailable: "The service is temporarily unavailable. Try again shortly.",
     errorGeneric: "Something went wrong ({code}). Try again.",
-    noApiKey: "No API key is set for this page.",
     takingTooLong: "This is taking longer than usual. Reload the page to check again.",
 
     preparingPhotos: "Preparing your photos…",
@@ -131,7 +129,6 @@ export const COPY = {
     settings: "Settings",
     resultLanguage: "Language for the result",
     languageHintReady: "English and Pidgin dey available.",
-    apiAddress: "API address",
 
     notice:
       "This tool dey compare the pack photo with NAFDAC records. E no be medical advice. Ask pharmacist or doctor about your medicine.",
@@ -173,7 +170,6 @@ export const COPY = {
     errorInvalidLanguage: "We no support that language.",
     errorUnavailable: "The service no dey available for now. Try again small time.",
     errorGeneric: "Something go wrong ({code}). Try again.",
-    noApiKey: "No API key dey for this page.",
     takingTooLong: "This one dey take longer than usual. Reload the page to check again.",
 
     preparingPhotos: "We dey prepare your photos…",

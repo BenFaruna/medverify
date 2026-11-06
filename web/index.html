@@ -19,7 +19,11 @@
   <body>
     <a class="skip-link" href="#log" data-copy="skipToConversation">Skip to conversation</a>
 
-    <div class="app">
+    <!-- [hidden] until the API confirms a session: a signed-out visitor is
+         sent to /login instead of seeing a chat that cannot send anything. -->
+    <p id="session-check" class="session-check" role="status">Checking your session…</p>
+
+    <div id="app" class="app" hidden>
       <header class="site-header">
         <div class="brand">
           <span class="brand-mark" aria-hidden="true">
@@ -59,18 +63,10 @@
                   English and Pidgin are available.
                 </p>
               </div>
-              <div class="field">
-                <label for="api-base" data-copy="apiAddress">API address</label>
-                <input id="api-base" name="api-base" type="url" value="" placeholder="https://api.example" />
-              </div>
             </div>
           </details>
         </div>
       </header>
-
-      <!-- Development key. Hidden from the page; it is still visible in the
-           page source, so swap it out before this goes anywhere public. -->
-      <input id="api-key" name="api-key" type="hidden" value="dev-api-key" />
 
       <!-- The disclaimer is always visible and never dismissed. -->
       <div class="notice" role="note">

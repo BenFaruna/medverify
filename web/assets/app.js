@@ -4,10 +4,11 @@
 // quickly on a slow connection. It talks only to the documented public API and
 // never touches an internal endpoint.
 //
-// The API key is read from the page and held in memory for this tab only. It
-// is deliberately not written to localStorage or a cookie: a key in browser
-// storage outlives the session and is readable by any script that ends up on
-// the page.
+// The page holds no API key. The browser proves who it is with the HttpOnly
+// session cookie the sign-in page set, which the API accepts in place of
+// X-API-Key; the key itself exists for code the person runs themselves, so it
+// is never put in this page, its storage, or its URLs. A browser without a
+// session is sent to /login before the chat renders.
 
 import { COPY, REVIEWED_LANGUAGES, copyFor } from "./copy.js";
 
@@ -16,8 +17,6 @@ const MAX_LONG_EDGE = 1568;
 const JPEG_QUALITY = 0.82;
 const POLL_BUDGET_MS = 120_000;
 
-/** @type {string} */
-let apiKey = "";
 /** @type {string | null} */
 let currentScanId = null;
 /** @type {string | null} Reused when the same photos are retried. */
@@ -41,8 +40,8 @@ let activeCopy = COPY.en;
 let activeLanguage = "en";
 
 const el = {
-  apiKey: document.getElementById("api-key"),
-  apiBase: document.getElementById("api-base"),
+  app: document.getElementById("app"),
+  sessionCheck: document.getElementById("session-check"),
   language: document.getElementById("language"),
   log: document.getElementById("log"),
   chips: document.getElementById("chips"),
@@ -143,8 +142,30 @@ const SUGGESTIONS = ["suggestionRecord", "suggestionIngredients", "suggestionLea
 
 // --- API access -----------------------------------------------------------
 
+// The client is same-origin by design: its session cookie is scoped to this
+// host and sent only to it, so pointing the page at another deployment would
+// silently lose the credential.
 function apiBase() {
-  return (el.apiBase.value || window.location.origin).replace(/\/+$/, "");
+  return window.location.origin;
+}
+
+// A 401 means the session is gone: expired, revoked, or never there. Send the
+// person to sign in and come back to this page afterwards.
+function redirectToSignIn() {
+  const next = window.location.pathname + window.location.search;
+  window.location.replace(`/login?next=${encodeURIComponent(next)}`);
+}
+
+// hasSession asks the API who we are. Only a 401 redirects; a network failure
+// or a 5xx leaves the page up so the first real request can report it.
+async function hasSession() {
+  try {
+    const response = await fetch("/v1/account", { credentials: "same-origin" });
+    if (response.status === 401) return false;
+    return response.ok;
+  } catch {
+    return true;
+  }
 }
 
 class ApiError extends Error {
@@ -157,13 +178,18 @@ class ApiError extends Error {
 
 async function api(path, options = {}) {
   const headers = new Headers(options.headers || {});
-  headers.set("X-API-Key", apiKey);
-  const response = await fetch(apiBase() + path, { ...options, headers });
+  const response = await fetch(apiBase() + path, {
+    ...options,
+    headers,
+    credentials: "same-origin",
+  });
 
   if (response.ok) {
     if (response.status === 204) return null;
     return response.json();
   }
+
+  if (response.status === 401) redirectToSignIn();
 
   let problem = null;
   try {
@@ -534,16 +560,8 @@ async function poll(scanId, pending) {
 }
 
 async function sendPack() {
-  apiKey = el.apiKey.value.trim();
   const batch = pendingFiles.slice(0, MAX_PHOTOS);
   if (batch.length === 0) return;
-
-  if (!apiKey) {
-    const note = addMessage("assistant");
-    note.bubble.classList.add("error");
-    note.bubble.append(text("p", null, t("noApiKey")));
-    return;
-  }
 
   busy = true;
   limitNote = "";
@@ -565,12 +583,17 @@ async function sendPack() {
     idempotencyKey ??= crypto.randomUUID();
     const response = await fetch(`${apiBase()}/v1/scans`, {
       method: "POST",
-      headers: {
-        "X-API-Key": apiKey,
-        "Idempotency-Key": idempotencyKey,
-      },
+      headers: { "Idempotency-Key": idempotencyKey },
       body: form,
+      credentials: "same-origin",
     });
+
+    if (response.status === 401) {
+      // The session ended while the tab sat open. Nothing was queued on the
+      // server, so the person can sign in and send the same photos again.
+      redirectToSignIn();
+      return;
+    }
 
     if (!response.ok) {
       let problem = null;
@@ -777,10 +800,6 @@ function reset() {
 // --- Wiring ---------------------------------------------------------------
 
 function init() {
-  // Default the API address to the page's own origin: the API serves this
-  // client in the MVP, so same-origin avoids a CORS preflight entirely.
-  el.apiBase.value = window.location.origin;
-
   el.photoBtn.addEventListener("click", () => el.photoInput.click());
   el.photoInput.addEventListener("change", () => {
     addFiles(el.photoInput.files);
@@ -803,4 +822,16 @@ function init() {
   applyCopy();
 }
 
-init();
+// Nothing renders until the API confirms the session, so a signed-out visitor
+// sees no half-loaded chat before the redirect.
+async function start() {
+  if (!(await hasSession())) {
+    redirectToSignIn();
+    return;
+  }
+  init();
+  el.app.hidden = false;
+  if (el.sessionCheck) el.sessionCheck.hidden = true;
+}
+
+start();
