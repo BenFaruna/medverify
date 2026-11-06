@@ -16,6 +16,7 @@ import (
 	"syscall"
 
 	medapi "github.com/benfaruna/medverify/api"
+	"github.com/benfaruna/medverify/internal/account"
 	"github.com/benfaruna/medverify/internal/assistant"
 	"github.com/benfaruna/medverify/internal/llm"
 	"github.com/benfaruna/medverify/internal/platform/auth"
@@ -112,6 +113,19 @@ func run() error {
 		return fmt.Errorf("serve web client: %w", err)
 	}
 
+	// Accounts share the API pool and the API's tenant model: a registered
+	// person is an api_clients row, so the key issued at registration works on
+	// /v1/scans without a second credential type.
+	accountHandler := account.NewHTTPHandler(account.HTTPOptions{
+		Service: account.NewService(account.ServiceOptions{
+			Store:      account.NewDBStore(pool),
+			SessionTTL: cfg.Auth.SessionTTL,
+		}),
+		Logger:       logger,
+		SessionTTL:   cfg.Auth.SessionTTL,
+		SecureCookie: cfg.Env == config.EnvProduction,
+	})
+
 	handler := NewHandler(Options{
 		Logger: logger,
 		Web:    web,
@@ -131,6 +145,7 @@ func run() error {
 		RateLimitBurst:   cfg.API.RateLimitBurst,
 		CORSOrigins:      cfg.API.CORSOrigins,
 		APIKey:           cfg.API.LegacyKey,
+		Account:          accountHandler,
 		Metrics:          metrics.New(),
 		DisableAPI:       !cfg.Features.API,
 		DisableScans:     !cfg.Features.Scans,

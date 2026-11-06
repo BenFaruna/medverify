@@ -23,6 +23,7 @@ const (
 	CodeBadRequest        = "bad_request"
 	CodeConflict          = "conflict"
 	CodeCorruptImage      = "corrupt_image"
+	CodeForbidden         = "forbidden"
 	CodeImageTooLarge     = "image_too_large"
 	CodeInsufficientScope = "insufficient_scope"
 	CodeInternalError     = "internal_error"

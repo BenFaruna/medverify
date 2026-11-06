@@ -30,6 +30,10 @@ type Querier interface {
 	// Queries for the scan pipeline (phase 03). Hand-written SQL only; sqlc
 	// compiles it.
 	CreateScan(ctx context.Context, arg CreateScanParams) (Scan, error)
+	// Queries for self-service accounts. A user owns one api_clients row, so these
+	// sit beside the key queries in the same tenant model.
+	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	CreateUserSession(ctx context.Context, arg CreateUserSessionParams) (UserSession, error)
 	CreateWebhookEndpoint(ctx context.Context, arg CreateWebhookEndpointParams) (WebhookEndpoint, error)
 	DeactivateWatchlistEntry(ctx context.Context, id int64) (int64, error)
 	DeadLetterWebhookDelivery(ctx context.Context, arg DeadLetterWebhookDeliveryParams) error
@@ -60,6 +64,9 @@ type Querier interface {
 	GetScan(ctx context.Context, id uuid.UUID) (Scan, error)
 	GetScanResult(ctx context.Context, scanID uuid.UUID) (ScanResult, error)
 	GetUsageForUpdate(ctx context.Context, arg GetUsageForUpdateParams) (UsageCounter, error)
+	GetUserByEmail(ctx context.Context, email string) (User, error)
+	GetUserByID(ctx context.Context, id int64) (User, error)
+	GetUserBySessionToken(ctx context.Context, tokenHash string) (User, error)
 	IncrementUsage(ctx context.Context, arg IncrementUsageParams) error
 	InsertAssistantToolCall(ctx context.Context, arg InsertAssistantToolCallParams) error
 	// The primary key makes the race safe: one concurrent request wins and the
@@ -80,6 +87,7 @@ type Querier interface {
 	LastSuccessfulSyncRun(ctx context.Context) (SyncRun, error)
 	LatestSyncRun(ctx context.Context) (SyncRun, error)
 	ListAPIKeys(ctx context.Context) ([]ListAPIKeysRow, error)
+	ListAPIKeysForClient(ctx context.Context, clientID int64) ([]ListAPIKeysForClientRow, error)
 	ListAllWebhookEndpoints(ctx context.Context) ([]WebhookEndpoint, error)
 	ListDeadWebhookDeliveries(ctx context.Context, maxRows int32) ([]ListDeadWebhookDeliveriesRow, error)
 	// Documents that are readable and have not yet been indexed for this model and
@@ -125,6 +133,9 @@ type Querier interface {
 	RequeueFailedScan(ctx context.Context, id uuid.UUID) (int64, error)
 	RetryWebhookDelivery(ctx context.Context, arg RetryWebhookDeliveryParams) error
 	RevokeAPIKey(ctx context.Context, keyPrefix string) (int64, error)
+	RevokeUserSession(ctx context.Context, tokenHash string) (int64, error)
+	RevokeUserSessionsForUser(ctx context.Context, userID int64) (int64, error)
+	RotateAPIKeysForClient(ctx context.Context, clientID int64) (int64, error)
 	// Nearest-neighbour search: the inner query uses the GiST trigram index and
 	// stops after @row_limit names, so a large watchlist is never scored in full.
 	// The similarity threshold is applied to those candidates, which can return
@@ -139,6 +150,8 @@ type Querier interface {
 	StartSyncRun(ctx context.Context, startedAt time.Time) (SyncRun, error)
 	TouchAPIKey(ctx context.Context, id int64) error
 	TouchConversation(ctx context.Context, id uuid.UUID) error
+	TouchUserLogin(ctx context.Context, id int64) error
+	TouchUserSession(ctx context.Context, tokenHash string) error
 	// Queries for the Greenbook registry. Hand-written SQL only; sqlc compiles it.
 	// Insert or update a product when its payload hash changed. The xmax trick
 	// reports whether the row was inserted (true) or updated (false). No row is

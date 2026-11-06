@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/benfaruna/medverify/internal/account"
 	"github.com/benfaruna/medverify/internal/assistant"
 	"github.com/benfaruna/medverify/internal/platform/auth"
 	"github.com/benfaruna/medverify/internal/platform/httpx"
@@ -52,8 +53,13 @@ type Options struct {
 	Web http.Handler
 	// Docs serves the interactive API documentation at /docs and the OpenAPI
 	// document at /openapi.yaml. Nil disables both.
-	Docs      http.Handler
-	APIKey    string
+	Docs   http.Handler
+	APIKey string
+	// Account serves registration, sign-in, and API key management. It mounts
+	// outside the X-API-Key middleware: people authenticate with a session
+	// cookie and then manage the key their client code uses. Nil disables the
+	// account routes.
+	Account   *account.HTTPHandler
 	Scan      *scan.HTTPHandler
 	Assistant *assistant.HTTPHandler
 	// Metrics exposes /metrics when set. Only aggregate HTTP counters are
@@ -108,6 +114,33 @@ func NewHandler(opts Options) http.Handler {
 		router.Handle("/docs", opts.Docs)
 		router.Handle("/docs/*", opts.Docs)
 		router.Handle("/openapi.yaml", opts.Docs)
+	}
+
+	// Account routes mount before the static client, and outside the /v1 group,
+	// so a browser session never has to hold an API key to reach them. The
+	// per-address limiter still applies: these are the endpoints an attacker
+	// would guess passwords against.
+	if opts.Account != nil && !opts.DisableAPI {
+		ipLimit := auth.IPRateLimit(opts.Limiter, opts.IPRatePerMin, opts.RateLimitBurst)
+
+		router.Group(func(r chi.Router) {
+			r.Use(ipLimit)
+			r.Use(account.CSRF)
+
+			r.Post("/v1/auth/register", opts.Account.Register)
+			r.Post("/v1/auth/login", opts.Account.Login)
+			r.Post("/v1/auth/logout", opts.Account.Logout)
+		})
+
+		router.Group(func(r chi.Router) {
+			r.Use(ipLimit)
+			r.Use(account.CSRF)
+			r.Use(opts.Account.RequireSession)
+
+			r.Get("/v1/account", opts.Account.Me)
+			r.Get("/v1/account/api-keys", opts.Account.ListKeys)
+			r.Post("/v1/account/api-keys/rotate", opts.Account.RotateKey)
+		})
 	}
 
 	// The MVP client is static and talks only to the public API. It is mounted
@@ -260,6 +293,13 @@ func routePattern(r *http.Request) string {
 		return "/v1/scans/{id}/conversation"
 	case strings.HasPrefix(path, "/v1/scans/"):
 		return "/v1/scans/{id}"
+	case path == "/v1/auth/register", path == "/v1/auth/login",
+		path == "/v1/auth/logout", path == "/v1/account",
+		path == "/v1/account/api-keys", path == "/v1/account/api-keys/rotate":
+		// Account routes answer before the leaf is recorded only when a
+		// middleware rejects them; keep the paths out of the /v1/* bucket so a
+		// sign-in surge is visible in the metrics.
+		return path
 	case strings.HasPrefix(path, "/v1/"):
 		return "/v1/*"
 	default:

@@ -101,6 +101,38 @@ curl -H "X-API-Key: dev-api-key" localhost:8080/v1/scans/<id>
 A result never says a medicine is safe, genuine, or authentic. `unreadable`
 means the photo could not be read confidently, not that the product is fake.
 
+### 5. Create an account and manage your API key
+
+Open <http://localhost:8080/register>. Creating an account also creates its
+first API key and signs the browser in. The key is shown once, in that
+response; only its SHA-256 hash and public prefix are stored, so it cannot be
+displayed again.
+
+A registered person *is* an API client: registration writes one `api_clients`
+row, so the key it issues works on `/v1/scans` exactly like one from
+`admin apikey create`, with the same scopes, rate limit, and daily quotas.
+
+<http://localhost:8080/settings> lists the account's keys and rotates them.
+Rotation revokes every active key on the account immediately and returns the
+replacement once. Anything still sending the old key gets `401` until it is
+updated.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /v1/auth/register` | Create the account, its first key, and a session |
+| `POST /v1/auth/login` | Start a session |
+| `POST /v1/auth/logout` | Revoke the session and clear the cookie |
+| `GET /v1/account` | The signed-in account |
+| `GET /v1/account/api-keys` | Key metadata: prefix, scopes, state, timestamps |
+| `POST /v1/account/api-keys/rotate` | Revoke active keys, issue one replacement |
+
+The account routes use a session cookie, not `X-API-Key`, and are mounted
+outside the API-key middleware. The cookie is `HttpOnly`, `SameSite=Lax`, and
+`Secure` in production; cross-site writes are rejected server-side. Sign-in is
+rate limited per address. `AUTH_SESSION_TTL` (default `720h`) bounds how long a
+session lasts. Passwords are stored as PBKDF2-HMAC-SHA256 derives with 600,000
+iterations and a per-account salt.
+
 ### What is running
 
 | Service | Address | Role |

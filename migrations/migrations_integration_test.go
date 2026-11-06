@@ -62,6 +62,9 @@ func TestScanTablesExistAfterMigrateUp(t *testing.T) {
 
 	for _, table := range []string{
 		"api_clients", "scans", "scan_images", "scan_results", "idempotency_keys", "llm_calls",
+		// Self-service accounts: a user owns one api_clients row, and sessions
+		// are stored as token hashes only.
+		"users", "user_sessions", "api_keys", "usage_counters",
 	} {
 		assert.True(t, tableExists(t, databaseURL, table), "table %s should exist", table)
 	}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	medapi "github.com/benfaruna/medverify/api"
+	"github.com/benfaruna/medverify/internal/account"
 	"github.com/benfaruna/medverify/internal/platform/auth"
 	"github.com/benfaruna/medverify/internal/platform/httpx"
 	"github.com/benfaruna/medverify/internal/platform/metrics"
@@ -375,4 +377,65 @@ func TestMetricsUseRoutePatternsAndNeverScanIDs(t *testing.T) {
 	assert.Contains(t, body, "medverify_http_requests_total")
 	assert.Contains(t, body, "medverify_http_request_duration_seconds_count")
 	assert.NotContains(t, body, scanID, "a scan ID must never become a metric label")
+}
+
+// The account routes must not sit behind the API-key middleware: a person
+// signs in with a cookie, and only the account page ever needs to be reachable
+// without a key. Reaching the session check (rather than "X-API-Key is
+// required") is what proves the route is mounted in the right group.
+func TestAccountRoutesAreNotBehindTheAPIKey(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(Options{
+		Account: account.NewHTTPHandler(account.HTTPOptions{}),
+		// The static mount registers a catch-all pattern; the account routes
+		// must still win over it.
+		Web: newWebHandler(t),
+	})
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/account", nil))
+
+	assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "Sign in to continue")
+	assert.NotContains(t, recorder.Body.String(), "X-API-Key")
+
+	// A signed-out browser is sent to /login by the page; the API answer is a
+	// problem document, never HTML.
+	assert.Contains(t, recorder.Header().Get("Content-Type"), "application/problem+json")
+}
+
+// A cross-site form post carries the session cookie. The guard has to reject it
+// before the handler runs.
+func TestAccountRoutesRejectCrossSiteWrites(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(Options{Account: account.NewHTTPHandler(account.HTTPOptions{})})
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/auth/login",
+		strings.NewReader(`{"email":"ada@example.test","password":"a-long-enough-password"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Sec-Fetch-Site", "cross-site")
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	assert.Equal(t, http.StatusForbidden, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "forbidden")
+}
+
+// The kill switch covers the whole /v1 surface, account routes included: a
+// maintenance window should not leave a sign-in form talking to nothing.
+func TestAccountRoutesAreDisabledWithTheAPI(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(Options{
+		Account:    account.NewHTTPHandler(account.HTTPOptions{}),
+		DisableAPI: true,
+	})
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/auth/login", nil))
+
+	assert.Equal(t, http.StatusNotFound, recorder.Code)
 }

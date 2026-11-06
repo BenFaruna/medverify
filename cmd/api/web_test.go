@@ -39,12 +39,38 @@ func TestWebClientServesTheAppAtRoot(t *testing.T) {
 func TestWebClientServesAssets(t *testing.T) {
 	t.Parallel()
 
-	for _, path := range []string{"/assets/app.js", "/assets/styles.css"} {
+	for _, path := range []string{"/assets/app.js", "/assets/auth.js", "/assets/styles.css"} {
 		recorder := httptest.NewRecorder()
 		newWebHandler(t).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
 
 		require.Equal(t, http.StatusOK, recorder.Code, path)
 		assert.NotEmpty(t, recorder.Body.String(), path)
+	}
+}
+
+// The account pages are separate documents rather than routes inside the chat
+// page: a sign-in form has to work even when the chat bundle fails to load.
+func TestWebClientServesAccountPages(t *testing.T) {
+	t.Parallel()
+
+	pages := map[string]string{
+		"/login":    `data-page="login"`,
+		"/register": `data-page="register"`,
+		"/settings": `data-page="settings"`,
+	}
+
+	for path, marker := range pages {
+		recorder := httptest.NewRecorder()
+		newWebHandler(t).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+
+		require.Equal(t, http.StatusOK, recorder.Code, path)
+		assert.Contains(t, recorder.Header().Get("Content-Type"), "text/html", path)
+		assert.Equal(t, "no-store", recorder.Header().Get("Cache-Control"), path)
+
+		body := recorder.Body.String()
+		assert.Contains(t, body, marker, path)
+		assert.Contains(t, body, `src="assets/auth.js"`, path)
+		assert.Contains(t, body, `href="assets/styles.css"`, path)
 	}
 }
 

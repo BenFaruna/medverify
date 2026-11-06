@@ -59,6 +59,14 @@ type Config struct {
 	Web        Web
 	Retention  Retention
 	Features   Features
+	Auth       Auth
+}
+
+// Auth holds self-service account settings.
+type Auth struct {
+	// SessionTTL bounds how long a sign-in lasts before the browser must sign
+	// in again. It also sets the session cookie lifetime.
+	SessionTTL time.Duration
 }
 
 // Features holds the phase 12 kill switches. They are read at startup, so
@@ -416,6 +424,9 @@ func LoadFrom(environ []string) (Config, error) {
 		Web: Web{
 			Dir: l.str("WEB_DIR", "web"),
 		},
+		Auth: Auth{
+			SessionTTL: l.duration("AUTH_SESSION_TTL", 720*time.Hour),
+		},
 		Features: Features{
 			API:       l.boolean("FEATURE_API_ENABLED", true),
 			Scans:     l.boolean("FEATURE_SCANS_ENABLED", true),
@@ -469,6 +480,9 @@ func LoadFrom(environ []string) (Config, error) {
 	}
 	if len(cfg.Greenbook.AllowedHosts) == 0 {
 		l.add("GREENBOOK_ALLOWED_HOSTS", "must list at least one leaflet host")
+	}
+	if cfg.Auth.SessionTTL <= 0 {
+		l.add("AUTH_SESSION_TTL", "must be a positive duration such as 720h")
 	}
 	if cfg.Env == EnvProduction && cfg.API.LegacyKey != "" {
 		l.add("API_LEGACY_KEY", "must be empty in production; issue database-backed API keys instead")

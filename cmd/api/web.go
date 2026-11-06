@@ -9,9 +9,19 @@ import (
 	"strings"
 )
 
-// webClient serves the static MVP at "/" and "/assets/". Leaving the directory
-// unset disables it, which is what a deployment that hosts the client elsewhere
-// wants.
+// webPages maps a URL path to the page file served there. Each page is its own
+// document rather than a client-side route: a failed sign-in still has to work
+// with JavaScript half-loaded, and the app page stays exactly as it was.
+var webPages = map[string]string{
+	"/":         "index.html",
+	"/login":    "login.html",
+	"/register": "register.html",
+	"/settings": "settings.html",
+}
+
+// webClient serves the static client at "/", the account pages, and "/assets/".
+// Leaving the directory unset disables it, which is what a deployment that
+// hosts the client elsewhere wants.
 //
 // The client is a plain static bundle: it calls only the documented public API
 // and never an internal endpoint.
@@ -28,9 +38,13 @@ func webClient(dir string) (http.Handler, error) {
 		return nil, &fs.PathError{Op: "open", Path: dir, Err: errors.New("not a directory")}
 	}
 
-	index := filepath.Join(dir, "index.html")
-	if _, err := os.Stat(index); err != nil {
-		return nil, err
+	pages := make(map[string]string, len(webPages))
+	for route, name := range webPages {
+		path := filepath.Join(dir, name)
+		if _, err := os.Stat(path); err != nil {
+			return nil, err
+		}
+		pages[route] = path
 	}
 
 	assets := filepath.Join(dir, "assets")
@@ -38,9 +52,10 @@ func webClient(dir string) (http.Handler, error) {
 	router := http.NewServeMux()
 	router.Handle("/assets/", cacheable(http.StripPrefix("/assets/", http.FileServer(http.Dir(assets)))))
 	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// Only the exact root is the app. Anything else stays a problem-JSON
-		// 404 from the API router rather than an HTML page.
-		if r.URL.Path != "/" {
+		// Only a known page is served. Anything else stays a problem-JSON 404
+		// from the API router rather than an HTML page.
+		page, ok := pages[r.URL.Path]
+		if !ok {
 			http.NotFound(w, r)
 			return
 		}
@@ -52,7 +67,7 @@ func webClient(dir string) (http.Handler, error) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		http.ServeFile(w, r, index)
+		http.ServeFile(w, r, page)
 	})
 
 	// Reject a path with a `.` or `..` segment outright. http.ServeMux would

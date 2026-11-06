@@ -252,6 +252,28 @@ type UsageCounter struct {
 	CostUsd   pgtype.Numeric `json:"cost_usd"`
 }
 
+type User struct {
+	ID           int64      `json:"id"`
+	Email        string     `json:"email"`
+	Name         string     `json:"name"`
+	PasswordHash string     `json:"password_hash"`
+	ClientID     int64      `json:"client_id"`
+	Active       bool       `json:"active"`
+	LastLoginAt  *time.Time `json:"last_login_at"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
+type UserSession struct {
+	ID         uuid.UUID  `json:"id"`
+	UserID     int64      `json:"user_id"`
+	TokenHash  string     `json:"token_hash"`
+	CreatedAt  time.Time  `json:"created_at"`
+	LastSeenAt time.Time  `json:"last_seen_at"`
+	ExpiresAt  time.Time  `json:"expires_at"`
+	RevokedAt  *time.Time `json:"revoked_at"`
+}
+
 type WatchlistEntry struct {
 	ID               int64      `json:"id"`
 	SourceID         int64      `json:"source_id"`

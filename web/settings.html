@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="robots" content="noindex" />
+    <meta name="description" content="Manage your MedVerify NG account and API keys." />
+    <title>Settings · MedVerify NG</title>
+    <link rel="stylesheet" href="assets/styles.css" />
+    <script type="module" src="assets/auth.js"></script>
+  </head>
+  <body data-page="settings">
+    <a class="skip-link" href="#main">Skip to your settings</a>
+
+    <div class="app account">
+      <header class="site-header">
+        <a class="brand" href="/">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3.4 5.2 5.9v5.3c0 4.2 2.8 7.6 6.8 9 4-1.4 6.8-4.8 6.8-9V5.9z" />
+              <path d="m9.1 11.9 2 2 3.8-4.2" />
+            </svg>
+          </span>
+          <div class="brand-text">
+            <h1>MedVerify NG</h1>
+            <p class="tagline">Account settings</p>
+          </div>
+        </a>
+        <nav class="account-nav" aria-label="Account">
+          <a class="pill-link" href="/">Open the app</a>
+          <button id="logout" class="pill-link" type="button">Sign out</button>
+        </nav>
+      </header>
+
+      <main id="main" class="account-main">
+        <!-- Shown until /v1/account answers. A signed-out visitor is sent to
+             /login instead of seeing an empty settings page. -->
+        <p id="loading" class="hint" role="status">Loading your account…</p>
+
+        <p id="page-error" class="form-error" role="alert" hidden></p>
+
+        <div id="account-content" hidden>
+          <section class="account-card" aria-labelledby="account-title">
+            <p class="eyebrow">Signed in</p>
+            <h2 id="account-title">Your account</h2>
+            <dl class="account-facts">
+              <div><dt>Name</dt><dd id="account-name">—</dd></div>
+              <div><dt>Email</dt><dd id="account-email">—</dd></div>
+              <div><dt>Member since</dt><dd id="account-created">—</dd></div>
+            </dl>
+          </section>
+
+          <section id="key-panel" class="account-card key-panel" aria-labelledby="new-key-title" hidden>
+            <p class="eyebrow">New key</p>
+            <h2 id="new-key-title">Copy this key now</h2>
+            <p class="key-warning" role="alert">
+              This is the only time the new key is shown. Nothing here can read it
+              back, so copy it before you leave the page.
+            </p>
+
+            <div class="key-row">
+              <label class="sr-only" for="new-key">API key</label>
+              <input id="new-key" class="key-value" type="text" readonly />
+              <button id="copy-key" class="btn ghost" type="button">Copy</button>
+            </div>
+            <p id="copy-status" class="hint" role="status"></p>
+          </section>
+
+          <section class="account-card" aria-labelledby="keys-title">
+            <p class="eyebrow">Credentials</p>
+            <h2 id="keys-title">API keys</h2>
+            <p class="hint">
+              Your client sends one of these as <code>X-API-Key</code>. The full
+              value is never shown again after it is issued; these rows show the
+              public prefix so you can tell keys apart.
+            </p>
+
+            <ul id="key-list" class="key-list" aria-live="polite"></ul>
+
+            <div id="rotate-block" class="rotate">
+              <button id="rotate" class="btn primary" type="button">Rotate API key</button>
+              <div id="rotate-confirm" class="rotate-confirm" hidden>
+                <p class="hint">
+                  Rotation revokes every active key on this account immediately.
+                  Anything still sending the old key will start getting
+                  <code>401</code> until it is updated.
+                </p>
+                <div class="account-actions">
+                  <button id="rotate-confirm-yes" class="btn primary" type="button">
+                    Rotate and show the new key
+                  </button>
+                  <button id="rotate-cancel" class="btn ghost" type="button">Cancel</button>
+                </div>
+              </div>
+            </div>
+
+            <p id="rotate-status" class="hint" role="status"></p>
+            <p id="rotate-error" class="form-error" role="alert" hidden></p>
+          </section>
+
+          <section class="account-card" aria-labelledby="session-title">
+            <p class="eyebrow">Session</p>
+            <h2 id="session-title">This browser</h2>
+            <p class="hint">
+              You are signed in with a session cookie that this page cannot read.
+              Signing out ends it on the server as well as here.
+            </p>
+            <div class="account-actions">
+              <button id="logout-secondary" class="btn ghost" type="button">Sign out</button>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <noscript>
+      <p class="noscript">Your settings need JavaScript. Enable it and reload this page.</p>
+    </noscript>
+  </body>
+</html>

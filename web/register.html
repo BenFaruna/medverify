@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="robots" content="noindex" />
+    <meta name="description" content="Create a MedVerify NG account and get an API key." />
+    <title>Create account · MedVerify NG</title>
+    <link rel="stylesheet" href="assets/styles.css" />
+    <script type="module" src="assets/auth.js"></script>
+  </head>
+  <body data-page="register">
+    <a class="skip-link" href="#main">Skip to the registration form</a>
+
+    <div class="app account">
+      <header class="site-header">
+        <a class="brand" href="/">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3.4 5.2 5.9v5.3c0 4.2 2.8 7.6 6.8 9 4-1.4 6.8-4.8 6.8-9V5.9z" />
+              <path d="m9.1 11.9 2 2 3.8-4.2" />
+            </svg>
+          </span>
+          <div class="brand-text">
+            <h1>MedVerify NG</h1>
+            <p class="tagline">Account</p>
+          </div>
+        </a>
+        <nav class="account-nav" aria-label="Account">
+          <a class="pill-link" href="/login">Sign in</a>
+        </nav>
+      </header>
+
+      <main id="main" class="account-main">
+        <section id="register-panel" class="account-card" aria-labelledby="register-title">
+          <p class="eyebrow">Account</p>
+          <h2 id="register-title">Create your account</h2>
+          <p class="hint">
+            An API key is created with the account and shown to you once. Keep it
+            somewhere safe: it authenticates your scan requests.
+          </p>
+
+          <form id="register-form" data-account-form="register" novalidate>
+            <div class="field">
+              <label for="name">Name <span class="label-note">(optional)</span></label>
+              <input id="name" name="name" type="text" autocomplete="name" maxlength="100" />
+            </div>
+
+            <div class="field">
+              <label for="email">Email address</label>
+              <input
+                id="email"
+                name="email"
+                type="email"
+                autocomplete="username"
+                inputmode="email"
+                autocapitalize="none"
+                spellcheck="false"
+                required
+              />
+            </div>
+
+            <div class="field">
+              <label for="password">Password</label>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                autocomplete="new-password"
+                minlength="12"
+                required
+                aria-describedby="password-hint"
+              />
+              <p id="password-hint" class="hint">At least 12 characters.</p>
+            </div>
+
+            <div class="field">
+              <label for="confirm">Confirm password</label>
+              <input
+                id="confirm"
+                name="confirm"
+                type="password"
+                autocomplete="new-password"
+                minlength="12"
+                required
+              />
+            </div>
+
+            <p id="form-error" class="form-error" role="alert" hidden></p>
+
+            <button id="submit" class="btn primary" type="submit">Create account and API key</button>
+          </form>
+
+          <p class="hint">
+            Already registered? <a href="/login">Sign in</a>.
+          </p>
+        </section>
+
+        <!-- The key below exists only in this response and in the DOM. It is
+             never written to storage, so leaving the page loses it for good. -->
+        <section id="key-panel" class="account-card key-panel" aria-labelledby="key-title" hidden>
+          <p class="eyebrow">Your API key</p>
+          <h2 id="key-title">Copy this key now</h2>
+          <p class="key-warning" role="alert">
+            This is the only time the key is shown. It is not stored anywhere we
+            can read back, so if you lose it you will have to rotate it.
+          </p>
+
+          <div class="key-row">
+            <label class="sr-only" for="new-key">API key</label>
+            <input id="new-key" class="key-value" type="text" readonly />
+            <button id="copy-key" class="btn ghost" type="button">Copy</button>
+          </div>
+
+          <p id="copy-status" class="hint" role="status"></p>
+
+          <ul class="key-meta">
+            <li><span>Prefix</span> <code id="key-prefix"></code></li>
+            <li><span>Scopes</span> <code id="key-scopes"></code></li>
+          </ul>
+
+          <p class="hint">
+            Send it as the <code>X-API-Key</code> header. You can rotate it at any
+            time from your settings.
+          </p>
+
+          <a class="btn primary" href="/settings">Go to settings</a>
+        </section>
+      </main>
+    </div>
+
+    <noscript>
+      <p class="noscript">Creating an account needs JavaScript. Enable it and reload this page.</p>
+    </noscript>
+  </body>
+</html>
