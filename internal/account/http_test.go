@@ -9,6 +9,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -148,6 +149,23 @@ func (f *fakeStore) RotateKey(_ context.Context, params RotateParams) (int64, AP
 	// Newest first, matching ListAPIKeysForClient.
 	f.keys[params.ClientID] = append([]APIKey{key}, f.keys[params.ClientID]...)
 	return revoked, key, nil
+}
+
+func (f *fakeStore) ClientPlan(_ context.Context, clientID int64) (ClientPlan, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	for _, user := range f.users {
+		if user.ClientID == clientID {
+			return ClientPlan{
+				Name:              "user_fake",
+				RatePerMin:        60,
+				DailyRequestQuota: 10000,
+				DailyScanQuota:    200,
+			}, nil
+		}
+	}
+	return ClientPlan{}, ErrNoClient
 }
 
 func (f *fakeStore) user(email string) (StoredUser, bool) {
@@ -601,4 +619,53 @@ func mustParse(t *testing.T, raw string) *url.URL {
 	parsed, err := url.Parse(raw)
 	require.NoError(t, err)
 	return parsed
+}
+
+// The chat page calls /v1 with the cookie and no key. This mounts the real
+// middleware around a handler that reports the principal, so the seam between
+// the session resolver and the API's rate and quota limits is exercised: the
+// browser inherits the plan of the client row the account owns.
+func TestSessionAuthFeedsTheAPIWithTheAccountPlan(t *testing.T) {
+	t.Parallel()
+
+	store := newFakeStore()
+	service := NewService(ServiceOptions{Store: store})
+	handler := NewHTTPHandler(HTTPOptions{Service: service})
+
+	registration, err := service.Register(context.Background(), RegisterInput{
+		Email:    "ada@example.test",
+		Password: "a-long-enough-password",
+	})
+	require.NoError(t, err)
+
+	api := auth.APIKeyOrSession(nil, handler.SessionAuth())(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		principal, ok := auth.PrincipalFromContext(r.Context())
+		require.True(t, ok, "the handler must see a principal")
+		_, _ = w.Write([]byte(principal.TenantKey()))
+	}))
+	server := httptest.NewServer(api)
+	t.Cleanup(server.Close)
+
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/v1/scans", nil)
+	require.NoError(t, err)
+	request.AddCookie(&http.Cookie{Name: SessionCookieName, Value: registration.Session.Token})
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+
+	response, err := http.DefaultClient.Do(request)
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	body, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	assert.Equal(t, "client:"+strconv.FormatInt(registration.User.ClientID, 10), string(body))
+
+	// The same request without the cookie is the documented 401: a browser that
+	// signed out is sent back to the sign-in page by the client.
+	anonymous, err := http.NewRequest(http.MethodGet, server.URL+"/v1/scans/abc", nil)
+	require.NoError(t, err)
+	anonResponse, err := http.DefaultClient.Do(anonymous)
+	require.NoError(t, err)
+	defer func() { _ = anonResponse.Body.Close() }()
+	assert.Equal(t, http.StatusUnauthorized, anonResponse.StatusCode)
 }

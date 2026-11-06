@@ -51,6 +51,7 @@ type Querier interface {
 	// A terminal write only applies to a row this worker claimed.
 	FinishScan(ctx context.Context, arg FinishScanParams) (int64, error)
 	FinishSyncRun(ctx context.Context, arg FinishSyncRunParams) error
+	GetAPIClientByID(ctx context.Context, id int64) (ApiClient, error)
 	GetAPIClientByName(ctx context.Context, name string) (ApiClient, error)
 	GetAPIKeyByPrefix(ctx context.Context, keyPrefix string) (GetAPIKeyByPrefixRow, error)
 	// Queries for the grounded assistant (phase 09). All reads are scoped by the

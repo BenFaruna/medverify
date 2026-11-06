@@ -86,39 +86,107 @@ func (p Principal) HasScope(scope string) bool {
 	return false
 }
 
+// SessionAuth resolves the browser session a request carries. present reports
+// whether the request has a session at all, so a caller without one gets the
+// ordinary missing-credentials answer instead of a resolution error.
+//
+// The resolver lives outside this package: only the account layer knows the
+// cookie name, the session table, and the plan a session inherits.
+type SessionAuth func(r *http.Request) (principal *Principal, present bool, err error)
+
 // APIKey builds middleware that authenticates every request with the key store.
 // The store must be non-nil; a nil store fails closed.
 func APIKey(store Store) func(http.Handler) http.Handler {
+	return APIKeyOrSession(store, nil)
+}
+
+// APIKeyOrSession authenticates an API client by its key, or a person by the
+// session cookie their browser holds. The header wins when both are present, so
+// a programmatic caller's plan always comes from its own key.
+//
+// A browser never needs to hold an API key: the cookie is HttpOnly, same-site,
+// and scoped to this origin, so it cannot be read by a script or replayed from
+// another site. Cookie-authenticated writes are additionally rejected when the
+// browser reports a cross-site origin; a key request needs no such check
+// because a browser cannot set the header without an approved CORS preflight.
+func APIKeyOrSession(store Store, session SessionAuth) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			provided := strings.TrimSpace(r.Header.Get(HeaderAPIKey))
-			if provided == "" {
-				writeUnauthorized(w, r)
+			if provided := strings.TrimSpace(r.Header.Get(HeaderAPIKey)); provided != "" {
+				principal, ok := lookupPrincipal(r.Context(), store, provided)
+				if !ok {
+					writeUnauthorized(w, r)
+					return
+				}
+				next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), principal)))
 				return
 			}
-			if store == nil {
+
+			if session == nil {
 				writeUnauthorized(w, r)
 				return
 			}
 
-			key, err := store.Lookup(r.Context(), provided)
-			if err != nil || key == nil {
+			principal, present, err := session(r)
+			if !present {
 				writeUnauthorized(w, r)
 				return
 			}
-
-			principal := &Principal{
-				ClientID:          key.ClientID,
-				Scopes:            key.Scopes,
-				Sandbox:           key.Sandbox,
-				ClientName:        key.ClientName,
-				RatePerMin:        key.RatePerMin,
-				DailyRequestQuota: key.DailyRequestQuota,
-				DailyScanQuota:    key.DailyScanQuota,
+			if !safeMethod(r.Method) && !httpx.SameOrigin(r) {
+				httpx.WriteProblem(w, r, httpx.NewProblem(
+					http.StatusForbidden,
+					httpx.CodeForbidden,
+					"This request came from another site.",
+				))
+				return
 			}
-			ctx := context.WithValue(r.Context(), principalKey{}, principal)
-			next.ServeHTTP(w, r.WithContext(ctx))
+			if err != nil || principal == nil {
+				// An expired or revoked session is a 401 so the browser can send
+				// the person back to the sign-in page.
+				httpx.WriteProblem(w, r, httpx.NewProblem(
+					http.StatusUnauthorized,
+					httpx.CodeUnauthorized,
+					"Sign in to continue.",
+				))
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), principal)))
 		})
+	}
+}
+
+// lookupPrincipal resolves a presented key. A nil store fails closed.
+func lookupPrincipal(ctx context.Context, store Store, provided string) (*Principal, bool) {
+	if store == nil {
+		return nil, false
+	}
+	key, err := store.Lookup(ctx, provided)
+	if err != nil || key == nil {
+		return nil, false
+	}
+	return &Principal{
+		ClientID:          key.ClientID,
+		Scopes:            key.Scopes,
+		Sandbox:           key.Sandbox,
+		ClientName:        key.ClientName,
+		RatePerMin:        key.RatePerMin,
+		DailyRequestQuota: key.DailyRequestQuota,
+		DailyScanQuota:    key.DailyScanQuota,
+	}, true
+}
+
+// WithPrincipal attaches an authenticated caller to a context. Middleware uses
+// it; a test that needs a principal without a store can too.
+func WithPrincipal(ctx context.Context, principal *Principal) context.Context {
+	return context.WithValue(ctx, principalKey{}, principal)
+}
+
+func safeMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return true
+	default:
+		return false
 	}
 }
 

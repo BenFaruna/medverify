@@ -212,6 +212,30 @@ func (s *DBStore) RotateKey(ctx context.Context, params RotateParams) (int64, AP
 	}, nil
 }
 
+// ClientPlan returns the rate limit and quota a session inherits from its
+// client row.
+func (s *DBStore) ClientPlan(ctx context.Context, clientID int64) (ClientPlan, error) {
+	client, err := dbgen.New(s.pool).GetAPIClientByID(ctx, clientID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ClientPlan{}, ErrNoClient
+		}
+		return ClientPlan{}, fmt.Errorf("get api client: %w", err)
+	}
+	if !client.Active {
+		// A session outliving its client must not authenticate: the client row
+		// is what carries the plan the API enforces.
+		return ClientPlan{}, ErrNoClient
+	}
+	return ClientPlan{
+		Name:              client.Name,
+		Sandbox:           client.Sandbox,
+		RatePerMin:        client.RatePerMin,
+		DailyRequestQuota: client.DailyRequestQuota,
+		DailyScanQuota:    client.DailyScanQuota,
+	}, nil
+}
+
 // isDuplicateEmail reports a unique violation on the account address. The
 // client name carries its own unique constraint, so the constraint name is
 // checked rather than the SQLSTATE alone.

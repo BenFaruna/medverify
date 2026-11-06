@@ -7,10 +7,10 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
+	"github.com/benfaruna/medverify/internal/platform/auth"
 	"github.com/benfaruna/medverify/internal/platform/httpx"
 )
 
@@ -306,6 +306,30 @@ func UserFromContext(ctx context.Context) (User, bool) {
 	return user, ok
 }
 
+// SessionAuth resolves the cookie a browser holds into an API principal, so the
+// chat page can call /v1/scans without ever holding an API key. It reports
+// present=false when the request carries no cookie, which lets the API answer a
+// key-less programmatic caller with its documented response.
+func (h *HTTPHandler) SessionAuth() auth.SessionAuth {
+	return func(r *http.Request) (*auth.Principal, bool, error) {
+		if h == nil {
+			return nil, false, nil
+		}
+		token := sessionToken(r)
+		if token == "" {
+			return nil, false, nil
+		}
+		if h.service == nil {
+			return nil, true, ErrNoSession
+		}
+		_, principal, err := h.service.Access(r.Context(), token)
+		if err != nil {
+			return nil, true, err
+		}
+		return &principal, true, nil
+	}
+}
+
 // CSRF guards cookie-authenticated writes. A session cookie is sent by the
 // browser on any request to this origin, so a form on another site could
 // otherwise rotate a key. SameSite=Lax already blocks a cross-site POST in
@@ -322,18 +346,9 @@ func CSRF(next http.Handler) http.Handler {
 			return
 		}
 
-		if site := r.Header.Get("Sec-Fetch-Site"); site != "" &&
-			site != "same-origin" && site != "none" {
+		if !httpx.SameOrigin(r) {
 			forbidden(w, r, "This request came from another site.")
 			return
-		}
-
-		if origin := r.Header.Get("Origin"); origin != "" {
-			parsed, err := url.Parse(origin)
-			if err != nil || !strings.EqualFold(parsed.Host, r.Host) {
-				forbidden(w, r, "This request came from another origin.")
-				return
-			}
 		}
 
 		next.ServeHTTP(w, r)

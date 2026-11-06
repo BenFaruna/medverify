@@ -155,6 +155,14 @@ func NewHandler(opts Options) http.Handler {
 			store = auth.NewSingleKeyStore(auth.SingleKeyOptions{Key: opts.APIKey})
 		}
 
+		// A browser calls these routes with its session cookie instead of a key,
+		// so the page never holds a credential a person could leak. Programmatic
+		// clients are unaffected: X-API-Key still wins when present.
+		var sessions auth.SessionAuth
+		if opts.Account != nil && !opts.DisableAPI {
+			sessions = opts.Account.SessionAuth()
+		}
+
 		router.Route("/v1", func(r chi.Router) {
 			// Kill switches answer before any auth or database work, so a
 			// maintenance window does not spend capacity on rejected calls.
@@ -164,7 +172,7 @@ func NewHandler(opts Options) http.Handler {
 			r.Use(auth.IPRateLimit(opts.Limiter, opts.IPRatePerMin, opts.RateLimitBurst))
 			// A nil store means no key can authenticate: every route below fails
 			// closed with 401 rather than serving unauthenticated traffic.
-			r.Use(auth.APIKey(store))
+			r.Use(auth.APIKeyOrSession(store, sessions))
 			r.Use(auth.RateLimit(auth.RateLimitOptions{
 				Limiter:           opts.Limiter,
 				DefaultRatePerMin: opts.RatePerMin,

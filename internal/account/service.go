@@ -37,6 +37,9 @@ var (
 	// ErrNoSession is returned when a session token is absent, expired, or
 	// revoked.
 	ErrNoSession = errors.New("no valid session")
+	// ErrNoClient is returned when an account's client row is missing, which
+	// the foreign key makes impossible unless the data was edited by hand.
+	ErrNoClient = errors.New("no such api client")
 )
 
 // ValidationError names the offending field so the client can point at it.
@@ -128,6 +131,17 @@ type SessionParams struct {
 	ExpiresAt time.Time
 }
 
+// ClientPlan is the rate limit and quota an api_clients row carries. A browser
+// session inherits it so the same person is limited the same way whether they
+// are using the web client or their own code.
+type ClientPlan struct {
+	Name              string
+	Sandbox           bool
+	RatePerMin        int32
+	DailyRequestQuota int32
+	DailyScanQuota    int32
+}
+
 // RotateParams replaces every active key on a client with one new key.
 type RotateParams struct {
 	ClientID  int64
@@ -156,6 +170,8 @@ type Store interface {
 	// RotateKey revokes the client's active keys and inserts the new one in one
 	// transaction, returning how many keys it revoked.
 	RotateKey(ctx context.Context, params RotateParams) (int64, APIKey, error)
+	// ClientPlan returns the plan attached to a client row, or ErrNoClient.
+	ClientPlan(ctx context.Context, clientID int64) (ClientPlan, error)
 }
 
 // ServiceOptions configures the account service. Every field has a safe
@@ -324,6 +340,33 @@ func (s *Service) Authenticate(ctx context.Context, token string) (User, error) 
 	}
 	_ = s.store.TouchSession(ctx, hash)
 	return user, nil
+}
+
+// Access resolves a browser session to the account and the API plan it acts
+// with. The browser holds no key, so the plan comes from the client row the
+// account owns: a signed-in person is limited exactly like their own key would
+// be against the same daily counters.
+func (s *Service) Access(ctx context.Context, token string) (User, auth.Principal, error) {
+	user, err := s.Authenticate(ctx, token)
+	if err != nil {
+		return User{}, auth.Principal{}, err
+	}
+
+	plan, err := s.store.ClientPlan(ctx, user.ClientID)
+	if err != nil {
+		return User{}, auth.Principal{}, err
+	}
+
+	return user, auth.Principal{
+		ClientID:   user.ClientID,
+		Scopes:     auth.AllScopes,
+		Sandbox:    plan.Sandbox,
+		ClientName: plan.Name,
+
+		RatePerMin:        plan.RatePerMin,
+		DailyRequestQuota: plan.DailyRequestQuota,
+		DailyScanQuota:    plan.DailyScanQuota,
+	}, nil
 }
 
 // Logout revokes a session. Revoking an already-dead token is not an error:

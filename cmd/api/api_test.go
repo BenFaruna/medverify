@@ -439,3 +439,31 @@ func TestAccountRoutesAreDisabledWithTheAPI(t *testing.T) {
 
 	assert.Equal(t, http.StatusNotFound, recorder.Code)
 }
+
+// The chat page calls /v1/scans with the session cookie and no key. Reaching
+// the session resolver (rather than "X-API-Key is required") proves the API
+// group accepts the browser credential, while a request carrying no credential
+// still gets the documented key error.
+func TestScanRoutesAcceptABrowserSession(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(Options{
+		Scan:    &scan.HTTPHandler{},
+		Account: account.NewHTTPHandler(account.HTTPOptions{}),
+	})
+
+	withCookie := httptest.NewRequest(http.MethodPost, "/v1/scans", nil)
+	withCookie.AddCookie(&http.Cookie{Name: account.SessionCookieName, Value: "opaque-token"})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, withCookie)
+
+	assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "Sign in to continue")
+	assert.NotContains(t, recorder.Body.String(), "X-API-Key")
+
+	// Nothing at all still fails with the documented API-key problem.
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/scans/abc", nil))
+	assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "X-API-Key")
+}

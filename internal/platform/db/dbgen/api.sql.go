@@ -149,6 +149,26 @@ func (q *Queries) EnsureUsageRow(ctx context.Context, arg EnsureUsageRowParams) 
 	return err
 }
 
+const getAPIClientByID = `-- name: GetAPIClientByID :one
+SELECT id, name, active, created_at, sandbox, rate_per_min, daily_request_quota, daily_scan_quota FROM api_clients WHERE id = $1
+`
+
+func (q *Queries) GetAPIClientByID(ctx context.Context, id int64) (ApiClient, error) {
+	row := q.db.QueryRow(ctx, getAPIClientByID, id)
+	var i ApiClient
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Active,
+		&i.CreatedAt,
+		&i.Sandbox,
+		&i.RatePerMin,
+		&i.DailyRequestQuota,
+		&i.DailyScanQuota,
+	)
+	return i, err
+}
+
 const getAPIClientByName = `-- name: GetAPIClientByName :one
 SELECT id, name, active, created_at, sandbox, rate_per_min, daily_request_quota, daily_scan_quota FROM api_clients WHERE name = $1
 `

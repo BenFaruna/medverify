@@ -9,6 +9,9 @@ RETURNING *;
 -- name: GetAPIClientByName :one
 SELECT * FROM api_clients WHERE name = @name;
 
+-- name: GetAPIClientByID :one
+SELECT * FROM api_clients WHERE id = @id;
+
 -- name: CreateAPIKey :one
 INSERT INTO api_keys (client_id, key_prefix, key_hash, scopes, expires_at)
 VALUES (@client_id, @key_prefix, @key_hash, @scopes, sqlc.narg('expires_at'))
