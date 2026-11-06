@@ -31,6 +31,23 @@ func (s *Store) ListProductsForLeafletSync(ctx context.Context, limit int) ([]Le
 	return targets, nil
 }
 
+// GetLeafletTarget loads one product as a leaflet download target. found=false
+// covers both a missing product and a product without an smpc_url, because
+// neither can be fetched; the caller's answer is the same either way.
+func (s *Store) GetLeafletTarget(ctx context.Context, productID int64) (LeafletTarget, bool, error) {
+	row, err := s.queries.GetProductLeafletTarget(ctx, productID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return LeafletTarget{}, false, nil
+	}
+	if err != nil {
+		return LeafletTarget{}, false, fmt.Errorf("get leaflet target %d: %w", productID, err)
+	}
+	if row.SmpcUrl == "" {
+		return LeafletTarget{}, false, nil
+	}
+	return LeafletTarget{ProductID: row.ID, SourceID: row.SourceID, URL: row.SmpcUrl}, true, nil
+}
+
 // GetSMPCDocument loads the current document row for a product URL.
 func (s *Store) GetSMPCDocument(ctx context.Context, productID int64, sourceURL string) (SMPCDocument, bool, error) {
 	row, err := s.queries.GetSMPCDocument(ctx, dbgen.GetSMPCDocumentParams{

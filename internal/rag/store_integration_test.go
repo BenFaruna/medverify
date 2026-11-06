@@ -268,3 +268,47 @@ func TestIndexRejectsAMismatchedDimension(t *testing.T) {
 	_, err := fixture.store.Index(ctx, embedder, rag.IndexOptions{Limit: 10})
 	require.ErrorIs(t, err, rag.ErrEmbeddingMismatch)
 }
+
+// The assistant's leaflet answer depends on reading three states apart, so the
+// query that reads them must survive a real schema: no document row at all, a
+// document that is stored but unindexed, and a document with chunks.
+func TestLeafletStatusReadsTheDocumentStateOfOneProduct(t *testing.T) {
+	fixture := newRAGFixture(t)
+	ctx := context.Background()
+
+	// A product with a published leaflet URL that has never been fetched.
+	var pendingID int64
+	require.NoError(t, fixture.pool.QueryRow(ctx, `
+		INSERT INTO products (source_id, nrn, name, status, raw, payload_hash, fetched_at, updated_at, smpc_url)
+		VALUES ('src-04-0900', '04-0900', 'Pending Tablets', 'Active', '{}'::jsonb, 'hash', now(), now(),
+			'https://example.test/leaflets/04-0900.pdf')
+		RETURNING id`).Scan(&pendingID))
+
+	status, found, err := fixture.store.LeafletStatus(ctx, pendingID)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, pendingID, status.ProductID)
+	assert.Zero(t, status.DocumentID, "an unfetched leaflet has no document row")
+	assert.Equal(t, "https://example.test/leaflets/04-0900.pdf", status.Link())
+	assert.False(t, status.Readable())
+	assert.True(t, status.Known())
+
+	// The same product after a download: the document row wins as the link and
+	// an unindexed document is still unreadable.
+	productID, documentID := fixture.seedLeaflet(t, "04-0901", "Stored Tablets", "sha-0901", nil)
+	_, err = fixture.store.Index(ctx, rag.NewFakeEmbedder(rag.VectorDimension, "fake-1024"), rag.IndexOptions{Limit: 10})
+	require.NoError(t, err)
+	status, found, err = fixture.store.LeafletStatus(ctx, productID)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, documentID, status.DocumentID)
+	assert.Equal(t, "ok", status.DocumentStatus)
+	assert.Equal(t, "https://example.test/leaflets/04-0901.pdf", status.DocumentURL)
+	// Sections were empty, so nothing was chunked: the leaflet is on file but
+	// cannot be quoted, which is a different answer from "no leaflet".
+	assert.False(t, status.Readable())
+
+	_, found, err = fixture.store.LeafletStatus(ctx, 999999)
+	require.NoError(t, err)
+	assert.False(t, found, "an unknown product must not be reported as a leaflet gap")
+}

@@ -40,6 +40,73 @@ func (q *Queries) DeleteRAGChunksForDocumentModel(ctx context.Context, arg Delet
 	return err
 }
 
+const getProductLeafletStatus = `-- name: GetProductLeafletStatus :one
+SELECT
+  p.id AS product_id,
+  COALESCE(p.smpc_url, '') AS smpc_url,
+  COALESCE(d.id, 0)::bigint AS document_id,
+  COALESCE(d.source_url, '') AS document_url,
+  COALESCE(d.status, '') AS document_status,
+  (SELECT count(*)::bigint FROM smpc_chunks c WHERE c.document_id = d.id) AS chunk_count
+FROM products p
+LEFT JOIN LATERAL (
+  SELECT id, source_url, status
+  FROM smpc_documents
+  WHERE product_id = p.id
+  ORDER BY (status = 'ok') DESC, id DESC
+  LIMIT 1
+) d ON TRUE
+WHERE p.id = $1
+`
+
+type GetProductLeafletStatusRow struct {
+	ProductID      int64  `json:"product_id"`
+	SmpcUrl        string `json:"smpc_url"`
+	DocumentID     int64  `json:"document_id"`
+	DocumentUrl    string `json:"document_url"`
+	DocumentStatus string `json:"document_status"`
+	ChunkCount     int64  `json:"chunk_count"`
+}
+
+// What the assistant may say about one product's leaflet: where it lives, what
+// state its download is in, and whether it has been chunked for retrieval. A
+// product with a URL but no document row is a leaflet that has not been fetched
+// yet, which is the case a question can trigger a background fetch for.
+func (q *Queries) GetProductLeafletStatus(ctx context.Context, productID int64) (GetProductLeafletStatusRow, error) {
+	row := q.db.QueryRow(ctx, getProductLeafletStatus, productID)
+	var i GetProductLeafletStatusRow
+	err := row.Scan(
+		&i.ProductID,
+		&i.SmpcUrl,
+		&i.DocumentID,
+		&i.DocumentUrl,
+		&i.DocumentStatus,
+		&i.ChunkCount,
+	)
+	return i, err
+}
+
+const getProductLeafletTarget = `-- name: GetProductLeafletTarget :one
+SELECT id, source_id, COALESCE(smpc_url, '') AS smpc_url
+FROM products
+WHERE id = $1
+`
+
+type GetProductLeafletTargetRow struct {
+	ID       int64  `json:"id"`
+	SourceID string `json:"source_id"`
+	SmpcUrl  string `json:"smpc_url"`
+}
+
+// One product as a leaflet download target, for a fetch triggered by a
+// question rather than the nightly sweep. The caller checks smpc_url.
+func (q *Queries) GetProductLeafletTarget(ctx context.Context, productID int64) (GetProductLeafletTargetRow, error) {
+	row := q.db.QueryRow(ctx, getProductLeafletTarget, productID)
+	var i GetProductLeafletTargetRow
+	err := row.Scan(&i.ID, &i.SourceID, &i.SmpcUrl)
+	return i, err
+}
+
 const insertRAGChunk = `-- name: InsertRAGChunk :exec
 INSERT INTO smpc_chunks (
   product_id, document_id, section_id, section_code, heading, page_start,

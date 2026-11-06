@@ -24,6 +24,11 @@ type Session struct {
 	Language  string
 	Match     verify.MatchResult
 	Flags     []safety.Flag
+	// Leaflet is the leaflet on file for this product, resolved once per turn.
+	// Readable() is false both when nothing was downloaded and when the
+	// download is stored but not yet chunked, and a question about the leaflet
+	// has to tell those apart from a pack with no leaflet at all.
+	Leaflet rag.LeafletStatus
 }
 
 // Citation is one source the model may cite. ID is stable within a turn and is
@@ -242,13 +247,42 @@ func (t *Toolbox) safetyFlags(session Session) ToolResult {
 	return result
 }
 
+// leafletDocumentCitation describes the leaflet as a document rather than as a
+// passage. It is returned with every leaflet answer so the person always has a
+// link, and so the verifier can support an answer that gives the link.
+func leafletDocumentCitation(status rag.LeafletStatus) (Citation, bool) {
+	link := status.Link()
+	if link == "" {
+		return Citation{}, false
+	}
+	id := "leaflet:document"
+	if status.DocumentID > 0 {
+		id = fmt.Sprintf("leaflet:document:%d", status.DocumentID)
+	}
+	state := status.DocumentStatus
+	if state == "" {
+		state = "not fetched yet"
+	}
+	return Citation{
+		ID:    id,
+		Kind:  "leaflet_document",
+		Title: "Leaflet for this pack",
+		URL:   link,
+		Text:  fmt.Sprintf("Leaflet on file for this pack. Download state: %s. Link: %s.", state, link),
+	}, true
+}
+
 func (t *Toolbox) searchLeaflet(ctx context.Context, row PolicyRow, session Session, args json.RawMessage) (ToolResult, error) {
 	result := ToolResult{Name: ToolSearchLeaflet}
+	if citation, ok := leafletDocumentCitation(session.Leaflet); ok {
+		result.Citations = append(result.Citations, citation)
+	}
 	if t.Searcher == nil || session.ProductID <= 0 {
 		result.Content = mustJSON(map[string]any{
-			"found":  false,
-			"reason": "no_leaflet",
-			"note":   "no readable leaflet is indexed for this scan",
+			"found":        false,
+			"reason":       "no_registry_product",
+			"note":         "the scan has no confirmed registry record, so no leaflet can be looked up",
+			"document_url": session.Leaflet.Link(),
 		})
 		return result, nil
 	}
@@ -287,10 +321,19 @@ func (t *Toolbox) searchLeaflet(ctx context.Context, row PolicyRow, session Sess
 		return ToolResult{Name: ToolSearchLeaflet, IsError: true, Content: `{"error":"leaflet_search_failed"}`}, err
 	}
 	if len(hits) == 0 {
+		// Distinguish "the leaflet has no such passage" from "we have not read
+		// the leaflet yet", so the model never says the leaflet lacks a topic it
+		// simply has not been indexed for.
+		reason, note := "no_match", "the leaflet on file has no matching passage"
+		if !session.Leaflet.Readable() {
+			reason, note = "leaflet_not_readable", "the leaflet for this pack is not readable yet, so no passage can be quoted"
+		}
 		result.Content = mustJSON(map[string]any{
-			"found":  false,
-			"reason": "no_match",
-			"note":   "the leaflet on file has no matching passage",
+			"found":          false,
+			"reason":         reason,
+			"note":           note,
+			"document_url":   session.Leaflet.Link(),
+			"document_state": session.Leaflet.DocumentStatus,
 		})
 		return result, nil
 	}
@@ -317,7 +360,11 @@ func (t *Toolbox) searchLeaflet(ctx context.Context, row PolicyRow, session Sess
 			"passage":    text,
 		})
 	}
-	result.Content = mustJSON(map[string]any{"found": true, "passages": passages})
+	result.Content = mustJSON(map[string]any{
+		"found":        true,
+		"passages":     passages,
+		"document_url": session.Leaflet.Link(),
+	})
 	return result, nil
 }
 

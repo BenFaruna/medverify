@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"regexp"
 	"strings"
 
 	"github.com/benfaruna/medverify/internal/llm"
@@ -37,10 +38,37 @@ func NewRouter(client llm.Client, prompt string, languages []string) *Router {
 	return &Router{Client: client, Prompt: prompt, Languages: languages, DefaultLang: languages[0], MaxTokens: 256}
 }
 
+// leafletPattern matches the ways a person names the leaflet in a question. It
+// is consulted only when classification failed, so this is a safety net rather
+// than a classifier: a leaflet question must never come back as "I did not
+// understand", whatever the small model did with it. Word boundaries keep
+// "pill" and "pilot" out.
+var leafletPattern = regexp.MustCompile(`(?i)\b(leaflets?|pack inserts?|package inserts?|patient information|pil|smpc)\b`)
+
+// namesLeaflet reports whether the question names the leaflet at all.
+func namesLeaflet(question string) bool { return leafletPattern.MatchString(question) }
+
 // Route classifies one question. Malformed output, an unknown intent, or an
 // unsupported language falls back to the safest values; it never errors toward
 // an answer.
 func (r *Router) Route(ctx context.Context, question, hintedLanguage string) (Route, error) {
+	route, err := r.classify(ctx, question, hintedLanguage)
+	if err != nil {
+		return Route{}, err
+	}
+	// A question that names the leaflet is a leaflet question even when the
+	// model returned nothing usable. The leaflet row only searches the leaflet
+	// on file and every claim it produces is verified against a passage, so
+	// promoting an unclassified question is strictly more useful than the
+	// unknown fallback and no less safe.
+	if namesLeaflet(question) && (route.Malformed || route.Intent == IntentUnknown) {
+		return Route{Intent: IntentLeaflet, Language: route.Language}, nil
+	}
+	return route, nil
+}
+
+// classify asks the small model for a route.
+func (r *Router) classify(ctx context.Context, question, hintedLanguage string) (Route, error) {
 	if r == nil || r.Client == nil {
 		return Route{Intent: IntentUnknown, Language: r.language(hintedLanguage), Malformed: true}, nil
 	}

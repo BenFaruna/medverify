@@ -103,7 +103,7 @@ func run() error {
 		return err
 	}
 
-	assistantHandler, err := buildAssistant(cfg, pool, logger, scanService)
+	assistantHandler, err := buildAssistant(cfg, pool, logger, scanService, jobs.NewLeafletEnqueuer(jobClient))
 	if err != nil {
 		return err
 	}
@@ -194,7 +194,7 @@ func buildKeyStore(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) a
 	return auth.NewChainStore(stores...)
 }
 
-func buildAssistant(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, scans assistant.ScanSource) (*assistant.HTTPHandler, error) {
+func buildAssistant(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, scans assistant.ScanSource, fetches assistant.LeafletFetcher) (*assistant.HTTPHandler, error) {
 	prompts, err := assistant.LoadPrompts(assistant.PromptVersion)
 	if err != nil {
 		return nil, err
@@ -262,6 +262,8 @@ func buildAssistant(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, 
 		Scans:            scans,
 		Resolver:         ragStore,
 		Searcher:         searcher,
+		Leaflets:         ragStore,
+		Fetches:          fetches,
 		Prompts:          prompts,
 		Router:           router,
 		Verifier:         verifier,

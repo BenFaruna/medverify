@@ -131,3 +131,32 @@ WHERE c.product_id = @product_id
   AND c.embedding_model = @embedding_model
 ORDER BY c.document_id, c.chunk_index
 LIMIT @row_limit;
+
+-- name: GetProductLeafletStatus :one
+-- What the assistant may say about one product's leaflet: where it lives, what
+-- state its download is in, and whether it has been chunked for retrieval. A
+-- product with a URL but no document row is a leaflet that has not been fetched
+-- yet, which is the case a question can trigger a background fetch for.
+SELECT
+  p.id AS product_id,
+  COALESCE(p.smpc_url, '') AS smpc_url,
+  COALESCE(d.id, 0)::bigint AS document_id,
+  COALESCE(d.source_url, '') AS document_url,
+  COALESCE(d.status, '') AS document_status,
+  (SELECT count(*)::bigint FROM smpc_chunks c WHERE c.document_id = d.id) AS chunk_count
+FROM products p
+LEFT JOIN LATERAL (
+  SELECT id, source_url, status
+  FROM smpc_documents
+  WHERE product_id = p.id
+  ORDER BY (status = 'ok') DESC, id DESC
+  LIMIT 1
+) d ON TRUE
+WHERE p.id = @product_id;
+
+-- name: GetProductLeafletTarget :one
+-- One product as a leaflet download target, for a fetch triggered by a
+-- question rather than the nightly sweep. The caller checks smpc_url.
+SELECT id, source_id, COALESCE(smpc_url, '') AS smpc_url
+FROM products
+WHERE id = @product_id;

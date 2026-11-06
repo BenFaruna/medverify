@@ -4,7 +4,7 @@ Choose the single best intent:
 - registration: registration status, NRN, manufacturer, applicant, approval or expiry dates.
 - ingredients: registered ingredients or strengths.
 - safety_flags: alerts, withdrawals, banned ingredients, or other sourced safety findings for this pack.
-- leaflet: what the leaflet says about warnings, contraindications, storage, or another leaflet topic.
+- leaflet: what the leaflet says about warnings, contraindications, storage, or another leaflet topic, and where to read, download, or find the leaflet itself. Any question that names the leaflet, pack insert, patient information, PIL, or SmPC is a leaflet question.
 - indications: what the medicine is used for.
 - personal_safety: whether it is suitable for the user, a child, or pregnancy.
 - dosing: how much to take or give, or a personal dose.

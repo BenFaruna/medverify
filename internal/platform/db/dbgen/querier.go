@@ -61,6 +61,14 @@ type Querier interface {
 	GetIdempotencyKey(ctx context.Context, arg GetIdempotencyKeyParams) (IdempotencyKey, error)
 	GetProductByNRN(ctx context.Context, nrn *string) (Product, error)
 	GetProductBySourceID(ctx context.Context, sourceID string) (Product, error)
+	// What the assistant may say about one product's leaflet: where it lives, what
+	// state its download is in, and whether it has been chunked for retrieval. A
+	// product with a URL but no document row is a leaflet that has not been fetched
+	// yet, which is the case a question can trigger a background fetch for.
+	GetProductLeafletStatus(ctx context.Context, productID int64) (GetProductLeafletStatusRow, error)
+	// One product as a leaflet download target, for a fetch triggered by a
+	// question rather than the nightly sweep. The caller checks smpc_url.
+	GetProductLeafletTarget(ctx context.Context, productID int64) (GetProductLeafletTargetRow, error)
 	GetSMPCDocument(ctx context.Context, arg GetSMPCDocumentParams) (SmpcDocument, error)
 	GetScan(ctx context.Context, id uuid.UUID) (Scan, error)
 	GetScanResult(ctx context.Context, scanID uuid.UUID) (ScanResult, error)

@@ -312,6 +312,13 @@ paths:
         `verified: false` and no sources. If the sources do not contain the
         answer, it returns the fixed not-found template. A model failure returns
         503 with `Retry-After`; it never returns a partial answer.
+
+        A question about the leaflet is answered from the leaflet when one is
+        stored and indexed. When it is not, the answer says so, still lists the
+        leaflet document in `sources` so the link is available, and queues a
+        background download plus indexing, so asking again later can quote it.
+        A question that names the leaflet is never answered as unclear, even if
+        the intent classifier returns nothing usable.
       tags: [assistant]
       security:
         - ApiKeyAuth: []
@@ -1429,7 +1436,10 @@ components:
             appear as `[1]`, `[2]`; the matching entries are in `sources`.
         sources:
           type: array
-          description: Sources cited by the answer. Empty for refusals and fallbacks.
+          description: |-
+            Sources cited by the answer. Empty for refusals, and for the unknown
+            fallback. A leaflet question answered from fixed text instead of
+            passages still lists the leaflet document, so the link is never lost.
           items:
             $ref: "#/components/schemas/AssistantSource"
         disclaimer:
@@ -1491,7 +1501,12 @@ components:
           description: The bracketed citation number shown in `answer`.
         kind:
           type: string
-          enum: [registry_record, safety_flag, leaflet]
+          enum: [registry_record, safety_flag, leaflet, leaflet_document]
+          description: |-
+            `leaflet_document` is the leaflet itself rather than a passage from
+            it, and carries the `url` a person can open. It is returned with a
+            leaflet answer even when no passage matched, so "where can I read
+            the leaflet" always has a link when NAFDAC publishes one.
         title:
           type: string
         url:

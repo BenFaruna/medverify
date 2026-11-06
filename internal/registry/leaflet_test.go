@@ -68,6 +68,15 @@ func (f *fakeLeafletRepo) ListProductsForLeafletSync(context.Context, int) ([]Le
 	return f.targets, nil
 }
 
+func (f *fakeLeafletRepo) GetLeafletTarget(_ context.Context, productID int64) (LeafletTarget, bool, error) {
+	for _, target := range f.targets {
+		if target.ProductID == productID {
+			return target, true, nil
+		}
+	}
+	return LeafletTarget{}, false, nil
+}
+
 func (f *fakeLeafletRepo) GetSMPCDocument(_ context.Context, productID int64, url string) (SMPCDocument, bool, error) {
 	doc, ok := f.docs[docKey(productID, url)]
 	return doc, ok, nil

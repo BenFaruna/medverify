@@ -178,3 +178,96 @@ func TestSafetyFlagsCarryTheirSource(t *testing.T) {
 		t.Fatal("a flag citation must keep its URL")
 	}
 }
+
+// A leaflet question always has a document to point at, and the tool says which
+// of the two gaps it hit: nothing downloaded, or downloaded but not searchable.
+func TestSearchLeafletCarriesTheDocumentAndSaysWhyNothingWasFound(t *testing.T) {
+	t.Parallel()
+
+	const link = "https://admin.greenbook.nafdac.gov.ng/leaflets/04-0858.pdf"
+	cases := []struct {
+		name       string
+		status     rag.LeafletStatus
+		wantReason string
+	}{
+		{
+			name:       "no document on file",
+			status:     rag.LeafletStatus{ProductID: 42, URL: link},
+			wantReason: "leaflet_not_readable",
+		},
+		{
+			name: "downloaded but not indexed",
+			status: rag.LeafletStatus{
+				ProductID: 42, URL: link, DocumentID: 9, DocumentURL: link,
+				DocumentStatus: "ok", Chunks: 0,
+			},
+			wantReason: "leaflet_not_readable",
+		},
+		{
+			name: "indexed but no matching passage",
+			status: rag.LeafletStatus{
+				ProductID: 42, URL: link, DocumentID: 9, DocumentURL: link,
+				DocumentStatus: "ok", Chunks: 3,
+			},
+			wantReason: "no_match",
+		},
+	}
+	for _, tc := range cases {
+		session := testSession()
+		session.Leaflet = tc.status
+		result, err := NewToolbox(&fakeSearcher{}).Call(
+			context.Background(), DefaultPolicy().Decide(IntentLeaflet), session, ToolSearchLeaflet,
+			json.RawMessage(`{"query":"warnings"}`),
+		)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+
+		var content struct {
+			Found       bool   `json:"found"`
+			Reason      string `json:"reason"`
+			DocumentURL string `json:"document_url"`
+		}
+		if err := json.Unmarshal([]byte(result.Content), &content); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if content.Found || content.Reason != tc.wantReason || content.DocumentURL != link {
+			t.Fatalf("%s: content = %s", tc.name, result.Content)
+		}
+
+		// The link is a citation, so an answer that gives it can be verified.
+		if len(result.Citations) != 1 {
+			t.Fatalf("%s: citations = %#v", tc.name, result.Citations)
+		}
+		citation := result.Citations[0]
+		if citation.Kind != "leaflet_document" || citation.URL != link {
+			t.Fatalf("%s: citation = %#v", tc.name, citation)
+		}
+	}
+}
+
+// A scan with no confirmed registry record cannot name a leaflet at all, which
+// is a different answer from a leaflet that has not been read yet.
+func TestSearchLeafletWithoutAProductSaysThereIsNoRecord(t *testing.T) {
+	t.Parallel()
+
+	session := testSession()
+	session.ProductID = 0
+	result, err := NewToolbox(&fakeSearcher{}).Call(
+		context.Background(), DefaultPolicy().Decide(IntentLeaflet), session, ToolSearchLeaflet,
+		json.RawMessage(`{"query":"warnings"}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var content struct {
+		Found  bool   `json:"found"`
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal([]byte(result.Content), &content); err != nil {
+		t.Fatal(err)
+	}
+	if content.Found || content.Reason != "no_registry_product" {
+		t.Fatalf("content = %s", result.Content)
+	}
+}

@@ -41,6 +41,38 @@ func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool, queries: dbgen.New(pool)}
 }
 
+// LeafletStatus is what the assistant may say about one product's leaflet. It
+// separates three states a question has to tell apart: no leaflet URL at all,
+// a URL that has not been downloaded yet, and a downloaded leaflet that has not
+// been chunked for retrieval.
+type LeafletStatus struct {
+	ProductID      int64
+	URL            string
+	DocumentID     int64
+	DocumentURL    string
+	DocumentStatus string
+	Chunks         int64
+}
+
+// Readable reports whether passages can be searched right now. A document that
+// is downloaded but not yet chunked is not readable, so the caller can ask for
+// indexing instead of claiming the leaflet does not exist.
+func (s LeafletStatus) Readable() bool {
+	return s.DocumentStatus == "ok" && s.Chunks > 0
+}
+
+// Known reports whether any leaflet location is on file, fetched or not.
+func (s LeafletStatus) Known() bool { return s.Link() != "" }
+
+// Link returns the best URL to show a person, preferring the document row over
+// the product record's column because the document row is what was fetched.
+func (s LeafletStatus) Link() string {
+	if s.DocumentURL != "" {
+		return s.DocumentURL
+	}
+	return s.URL
+}
+
 // IndexOptions bounds one indexing pass.
 type IndexOptions struct {
 	// Limit caps documents handled in this pass. The default is 50.
@@ -371,6 +403,27 @@ func (s *Store) ChunksForProduct(ctx context.Context, productID int64, model str
 		EmbeddingModel: model,
 		RowLimit:       int32(limit),
 	})
+}
+
+// LeafletStatus reports the leaflet state for one product. found=false means
+// the product is not in the local registry copy at all; an error means the
+// lookup could not run. The caller must not turn either into "no leaflet".
+func (s *Store) LeafletStatus(ctx context.Context, productID int64) (LeafletStatus, bool, error) {
+	row, err := s.queries.GetProductLeafletStatus(ctx, productID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return LeafletStatus{}, false, nil
+	}
+	if err != nil {
+		return LeafletStatus{}, false, fmt.Errorf("rag: leaflet status for product %d: %w", productID, err)
+	}
+	return LeafletStatus{
+		ProductID:      row.ProductID,
+		URL:            row.SmpcUrl,
+		DocumentID:     row.DocumentID,
+		DocumentURL:    row.DocumentUrl,
+		DocumentStatus: row.DocumentStatus,
+		Chunks:         row.ChunkCount,
+	}, true, nil
 }
 
 // FindProductID returns the local product id for a registry source id or NRN.

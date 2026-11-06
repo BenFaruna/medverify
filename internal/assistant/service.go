@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/benfaruna/medverify/internal/llm"
+	"github.com/benfaruna/medverify/internal/rag"
 	"github.com/benfaruna/medverify/internal/scan"
 )
 
@@ -35,6 +36,18 @@ type ProductResolver interface {
 	FindProductID(ctx context.Context, sourceID, nrn string) (int64, bool, error)
 }
 
+// LeafletSource reads the leaflet state for a product. rag.Store implements it.
+type LeafletSource interface {
+	LeafletStatus(ctx context.Context, productID int64) (rag.LeafletStatus, bool, error)
+}
+
+// LeafletFetcher asks for a background fetch of one product's leaflet. The
+// service never downloads in the request path: a person's question must be
+// answered immediately, and the download plus indexing is slow work.
+type LeafletFetcher interface {
+	EnsureLeaflet(ctx context.Context, productID int64) error
+}
+
 // TranscriptStore is the persistence seam for unit tests and the real store.
 type TranscriptStore interface {
 	GetConversation(ctx context.Context, scanID uuid.UUID) (Conversation, bool, error)
@@ -46,10 +59,14 @@ type TranscriptStore interface {
 
 // ServiceOptions configures the grounded assistant.
 type ServiceOptions struct {
-	Store     TranscriptStore
-	Scans     ScanSource
-	Resolver  ProductResolver
-	Searcher  LeafletSearcher
+	Store    TranscriptStore
+	Scans    ScanSource
+	Resolver ProductResolver
+	Searcher LeafletSearcher
+	// Leaflets reads whether the scanned pack has a leaflet on file.
+	Leaflets LeafletSource
+	// Fetches requests a background leaflet download when none is stored.
+	Fetches   LeafletFetcher
 	Client    llm.Client
 	Prompts   Prompts
 	Router    *Router
@@ -72,6 +89,8 @@ type Service struct {
 	store        TranscriptStore
 	scans        ScanSource
 	resolver     ProductResolver
+	leaflets     LeafletSource
+	fetches      LeafletFetcher
 	router       *Router
 	orchestrator *Orchestrator
 	catalogs     map[string]Catalog
@@ -148,6 +167,7 @@ func NewService(opts ServiceOptions) (*Service, error) {
 	}
 	return &Service{
 		store: opts.Store, scans: opts.Scans, resolver: opts.Resolver,
+		leaflets: opts.Leaflets, fetches: opts.Fetches,
 		router: router, orchestrator: orchestrator, catalogs: catalogs,
 		limits: opts.Limits, ttl: opts.ConversationTTL, maxTurns: opts.MaxTurns,
 		maxQuestion: opts.MaxQuestionBytes, maxHistory: opts.MaxHistoryMessages,
@@ -268,6 +288,18 @@ func (s *Service) Ask(ctx context.Context, request AskRequest) (AnswerView, erro
 		return AnswerView{}, err
 	}
 
+	// A leaflet question with no readable leaflet has nothing to quote and
+	// nothing to cite, so the model cannot answer it: every claim it produced
+	// would fail verification. Answer from the fixed text instead, keep the link
+	// that is on file, and ask for a download in the background so the next ask
+	// can quote the leaflet itself.
+	if row.Intent == IntentLeaflet && !session.Leaflet.Readable() {
+		return s.answerWithoutLeaflet(ctx, answerContext{
+			conversation: conversation, turn: turn, question: question,
+			route: route, catalog: catalog, session: session,
+		})
+	}
+
 	if !row.Answerable() {
 		text, err := catalog.Text(row.Template)
 		if err != nil {
@@ -302,11 +334,24 @@ func (s *Service) Ask(ctx context.Context, request AskRequest) (AnswerView, erro
 		return AnswerView{}, fmt.Errorf("assistant: turn produced no fixed or verified answer")
 	}
 
-	sources := make([]SourceView, 0, len(result.Sources))
-	sourceIDs := make([]string, 0, len(result.Sources))
+	sources := make([]SourceView, 0, len(result.Sources)+1)
+	sourceIDs := make([]string, 0, len(result.Sources)+1)
 	for _, source := range result.Sources {
 		sources = append(sources, SourceView(source))
 		sourceIDs = append(sourceIDs, source.ID)
+	}
+	// A leaflet question that ended in a fixed fallback still gets the link, so
+	// "the leaflet has no such passage" arrives with a way to read the leaflet
+	// rather than as a dead end. The link is a stored fact, not model text, and
+	// no claim is made about what the leaflet says.
+	if len(sources) == 0 && row.Intent == IntentLeaflet {
+		if citation, ok := leafletDocumentCitation(session.Leaflet); ok {
+			sources = append(sources, SourceView{
+				ID: citation.ID, Label: "1", Kind: citation.Kind,
+				Title: citation.Title, URL: citation.URL, Text: citation.Text,
+			})
+			sourceIDs = append(sourceIDs, citation.ID)
+		}
 	}
 	record := TurnRecord{
 		Conversation: conversation, Turn: turn, User: question, Answer: result.Text,
@@ -388,6 +433,79 @@ func (s *Service) loadScan(ctx context.Context, id uuid.UUID, clientKey string) 
 	return scanned, nil
 }
 
+// answerContext is the state the fixed leaflet answers need. It is a struct so
+// the function signature cannot drift as fields are added.
+type answerContext struct {
+	conversation Conversation
+	turn         int
+	question     string
+	route        Route
+	catalog      Catalog
+	session      Session
+}
+
+// answerWithoutLeaflet answers a leaflet question from fixed text when no
+// readable leaflet is stored. It admits the gap, points at the leaflet link when
+// one is known, and queues a fetch. The turn is recorded like any other, so the
+// transcript shows what the person asked and what they were told.
+func (s *Service) answerWithoutLeaflet(ctx context.Context, state answerContext) (AnswerView, error) {
+	key, verifier := TemplateFallbackNoLeaflet, "leaflet_unavailable"
+	if state.session.ProductID <= 0 {
+		// No confirmed registry record means no leaflet can be located at all,
+		// which is a different answer from "the leaflet has not been read yet".
+		key, verifier = TemplateFallbackNotFound, "leaflet_no_record"
+	}
+	text, err := state.catalog.Text(key)
+	if err != nil {
+		return AnswerView{}, err
+	}
+
+	sources := make([]SourceView, 0, 1)
+	if citation, ok := leafletDocumentCitation(state.session.Leaflet); ok {
+		sources = append(sources, SourceView{
+			ID: citation.ID, Label: "1", Kind: citation.Kind,
+			Title: citation.Title, URL: citation.URL, Text: citation.Text,
+		})
+	}
+
+	s.ensureLeaflet(ctx, state.session)
+
+	record := TurnRecord{
+		Conversation: state.conversation, Turn: state.turn, User: state.question,
+		Answer: text, Intent: state.route.Intent, Language: state.route.Language,
+		Verifier: verifier, RefusalKey: key,
+	}
+	if err := s.store.RecordTurn(ctx, record); err != nil {
+		return AnswerView{}, err
+	}
+	s.logger.InfoContext(ctx, "assistant answered without a leaflet",
+		slog.String("scan_id", state.session.ScanID.String()),
+		slog.Int("turn", state.turn),
+		slog.String("reason", verifier),
+		slog.Bool("link_known", len(sources) > 0),
+	)
+	return AnswerView{
+		ConversationID: state.conversation.ID.String(), Turn: state.turn,
+		Answer: text, Sources: sources, Intent: state.route.Intent,
+		Language: state.route.Language, Verified: false, Fallback: true,
+	}, nil
+}
+
+// ensureLeaflet queues a background fetch of the pack's leaflet. A failure is
+// logged, never shown: the answer already said the leaflet is not on file, and a
+// queue outage must not turn that into an error page.
+func (s *Service) ensureLeaflet(ctx context.Context, session Session) {
+	if s.fetches == nil || session.ProductID <= 0 {
+		return
+	}
+	if err := s.fetches.EnsureLeaflet(ctx, session.ProductID); err != nil {
+		s.logger.WarnContext(ctx, "could not queue a leaflet fetch",
+			slog.Int64("product_id", session.ProductID),
+			slog.Any("err", err),
+		)
+	}
+}
+
 func (s *Service) session(ctx context.Context, scanned scan.Scan) (Session, error) {
 	session := Session{ScanID: scanned.ID, Language: scanned.Language, Flags: scanned.Flags}
 	if scanned.Result == nil {
@@ -405,6 +523,15 @@ func (s *Service) session(ctx context.Context, scanned scan.Scan) (Session, erro
 		}
 		if found {
 			session.ProductID = id
+		}
+	}
+	if product := session.Match.Product; product != nil && session.ProductID > 0 && s.leaflets != nil {
+		status, found, err := s.leaflets.LeafletStatus(ctx, session.ProductID)
+		if err != nil {
+			return Session{}, fmt.Errorf("assistant: resolve the leaflet on file: %w", err)
+		}
+		if found {
+			session.Leaflet = status
 		}
 	}
 	return session, nil

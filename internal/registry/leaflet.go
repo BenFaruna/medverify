@@ -79,6 +79,7 @@ type Extraction struct {
 // it; tests use an in-memory fake.
 type LeafletRepository interface {
 	ListProductsForLeafletSync(ctx context.Context, limit int) ([]LeafletTarget, error)
+	GetLeafletTarget(ctx context.Context, productID int64) (LeafletTarget, bool, error)
 	GetSMPCDocument(ctx context.Context, productID int64, sourceURL string) (SMPCDocument, bool, error)
 	SaveSMPCDocument(ctx context.Context, doc SMPCDocument) (int64, error)
 	ReplaceSMPCSections(ctx context.Context, documentID int64, sections []SMPCSection) error
@@ -204,6 +205,27 @@ func (p *LeafletPipeline) Run(ctx context.Context, limit int) (LeafletSummary, e
 		if err := p.process(ctx, target, &summary); err != nil {
 			return summary, err
 		}
+	}
+	return summary, nil
+}
+
+// RunProduct fetches one product's leaflet and records the outcome. It exists
+// for a fetch a person asked for, which must not wait for the next sweep: the
+// work is the same process() path, so statuses and the "good extraction is
+// never overwritten" rule apply identically.
+func (p *LeafletPipeline) RunProduct(ctx context.Context, productID int64) (LeafletSummary, error) {
+	target, found, err := p.store.GetLeafletTarget(ctx, productID)
+	if err != nil {
+		return LeafletSummary{}, err
+	}
+	if !found {
+		// No product or no published leaflet URL: nothing to download. The
+		// caller already told the person the leaflet is not on file.
+		return LeafletSummary{}, nil
+	}
+	summary := LeafletSummary{Candidates: 1}
+	if err := p.process(ctx, target, &summary); err != nil {
+		return summary, err
 	}
 	return summary, nil
 }

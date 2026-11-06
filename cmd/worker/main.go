@@ -212,6 +212,15 @@ func run() error {
 	}))
 	clientOpts = append(clientOpts, jobs.WithPeriodicJobs(jobs.RAGIndexPeriodicJob(cfg.Embeddings)))
 
+	// A question about a pack whose leaflet is not stored queues this worker.
+	// The pipeline is the same one the admin CLI runs, so a question-triggered
+	// download records the same statuses and never replaces a good extraction.
+	leafletPipeline, err := registry.NewLeafletPipelineFromConfig(pool, cfg.Greenbook, objects, logger)
+	if err != nil {
+		return err
+	}
+	workerOpts = append(workerOpts, jobs.WithLeafletRunner(leafletPipeline))
+
 	// The dispatcher drains due deliveries on its own ticker. It shares the
 	// worker's lifetime and stops with it.
 	dispatcher := &webhook.Dispatcher{

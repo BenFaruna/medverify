@@ -34,8 +34,10 @@ templates:
     That information is not in the NAFDAC records or the leaflet on file for
     this pack. I cannot guess. Please check the pack or ask a pharmacist.
   fallback_no_leaflet: >-
-    There is no readable leaflet on file for this pack, so I cannot quote a
-    leaflet section.
+    There is no readable leaflet on file for this pack yet, so I cannot quote a
+    leaflet section. I have asked for the leaflet to be downloaded and read; if
+    NAFDAC publishes one, its link is listed with this answer. Please ask again
+    in a moment.
   fallback_unknown: >-
     I did not understand that as a question about this pack's records or
     leaflet. Please ask about registration details, ingredients, warnings, or
